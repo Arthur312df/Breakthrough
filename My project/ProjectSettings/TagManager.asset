@@ -5,11 +5,12 @@ TagManager:
   serializedVersion: 3
   tags:
   - Ground
+  - Mob
   layers:
   - Default
   - TransparentFX
   - Ignore Raycast
-  - 
+  - Mob
   - Water
   - UI
   - 

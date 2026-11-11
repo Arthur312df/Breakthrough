@@ -3,11 +3,11 @@ using UnityEngine;
 
 public class CameraSegue : MonoBehaviour
 {
-    [SerializeField] private Vector3 distancia = new Vector3(0f, 12f, -8f);
-    [SerializeField] private float suavidade = 8f;
+    [SerializeField] private Vector3 distancia = new Vector3(0f, 16f, -10f);
 
     private Transform alvo;
     private float proximoAviso;
+    private bool rotacaoDefinida = false;
 
     private void LateUpdate()
     {
@@ -24,13 +24,21 @@ public class CameraSegue : MonoBehaviour
             return;
         }
 
-        Vector3 destino = alvo.position + distancia;
-        transform.position = Vector3.Lerp(transform.position, destino, suavidade * Time.deltaTime);
+        // Posiciona a câmera de forma firme e direta, sem Lerp
+        transform.position = alvo.position + distancia;
+
+        // Define a rotação fixa olhando para o player apenas uma vez quando encontra o alvo
+        if (!rotacaoDefinida)
+        {
+            Vector3 direcao = alvo.position - transform.position;
+            transform.rotation = Quaternion.LookRotation(direcao);
+            rotacaoDefinida = true;
+        }
     }
 
     private Transform ProcurarAlvo()
     {
-        PlayerMovimento[] jogadores = FindObjectsByType<PlayerMovimento>();
+        PlayerMovimento[] jogadores = FindObjectsByType<PlayerMovimento>(FindObjectsInactive.Exclude);
         foreach (PlayerMovimento jogador in jogadores)
         {
             if (jogador.IsOwner)

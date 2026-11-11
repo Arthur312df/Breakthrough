@@ -16,9 +16,11 @@ GameObject:
   - component: {fileID: 3412301756377558986}
   - component: {fileID: 1576961512920062871}
   - component: {fileID: 5204535849531892140}
+  - component: {fileID: 6422862895380463813}
+  - component: {fileID: 5637753668908011978}
   m_Layer: 0
   m_Name: Player
-  m_TagString: Untagged
+  m_TagString: Player
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -230,3 +232,37 @@ MonoBehaviour:
   SwitchTransformSpaceWhenParented: 0
   Interpolate: 1
   SlerpPosition: 0
+--- !u!114 &6422862895380463813
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6338802990909326472}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b47c6ae53ce5a944fb4881a49d8cea53, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerAtaque
+  ShowTopMostFoldoutHeaderGroup: 1
+  alcanceAtaque: 2
+  danoAtaque: 25
+--- !u!114 &5637753668908011978
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6338802990909326472}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 584b96f04394b454cb447aab1d35dcff, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NetworkHealth
+  ShowTopMostFoldoutHeaderGroup: 1
+  vidaMaxima: 100
+  vidaAtual:
+    UpdateTraits:
+      MinSecondsBetweenUpdates: 0
+      MaxSecondsBetweenUpdates: 0
+    m_InternalValue: 100
