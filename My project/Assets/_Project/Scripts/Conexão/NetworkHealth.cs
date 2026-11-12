@@ -1,13 +1,14 @@
+using System;
 using Unity.Netcode;
-using Unity.Netcode.Components;
 using UnityEngine;
 
 public class NetworkHealth : NetworkBehaviour
 {
     [SerializeField] private int vidaMaxima = 100;
     
-    [Header("Drops (Apenas para Mobs)")]
+    [Header("Configuração de Entidade")]
     [SerializeField] private bool ehMob = false;
+    [SerializeField] private int xpRecompensa = 40;
 
     public NetworkVariable<int> vidaAtual = new NetworkVariable<int>(
         100, 
@@ -21,11 +22,19 @@ public class NetworkHealth : NetworkBehaviour
         NetworkVariableWritePermission.Server
     );
 
-    public System.Action<NetworkHealth> OnMobMorreu;
+    // Eventos limpos para o Mundo/UI escutarem
+    public Action<NetworkHealth> OnMobMorreu;
+    public static event Action<NetworkHealth> OnPlayerLocalSpawnou;
+    public event Action<bool> OnEstadoMorteLocalMudou;
 
-    private string Identificacao => TryGetComponent<NetworkObject>(out var netObj) 
-        ? (CompareTag("Player") || netObj.IsPlayerObject ? $"Player ID {netObj.OwnerClientId}" : $"Mob ID {netObj.NetworkObjectId}") 
-        : gameObject.name;
+    private PlayerMovimento playerMovimento;
+    private MobLoot mobLoot;
+
+    private void Awake()
+    {
+        playerMovimento = GetComponent<PlayerMovimento>();
+        mobLoot = GetComponent<MobLoot>();
+    }
 
     public override void OnNetworkSpawn()
     {
@@ -35,22 +44,42 @@ public class NetworkHealth : NetworkBehaviour
             estaMorto.Value = false;
         }
 
-        // Quando o jogador local nasce, garante que o painel de morte comece fechado
         if (IsOwner && !ehMob)
         {
-            ControlarPainelMorte(false);
+            estaMorto.OnValueChanged += AoMudarEstadoMorte;
+            OnPlayerLocalSpawnou?.Invoke(this);
+        }
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        if (IsOwner && !ehMob)
+        {
+            estaMorto.OnValueChanged -= AoMudarEstadoMorte;
+        }
+    }
+
+    private void AoMudarEstadoMorte(bool estavaMorto, bool mortoAgora)
+    {
+        OnEstadoMorteLocalMudou?.Invoke(mortoAgora);
+    }
+
+    public void AtualizarVidaMaxima(int novaVidaMaxima, bool curarTotalmente)
+    {
+        if (!IsServer) return;
+
+        vidaMaxima = novaVidaMaxima;
+        if (curarTotalmente)
+        {
+            vidaAtual.Value = vidaMaxima;
         }
     }
 
     public void TomarDano(int quantidade)
     {
-        if (!IsServer) return;
-        if (estaMorto.Value) return;
+        if (!IsServer || estaMorto.Value) return;
 
-        vidaAtual.Value -= quantidade;
-        vidaAtual.Value = Mathf.Clamp(vidaAtual.Value, 0, vidaMaxima);
-
-        Debug.Log($"[Health] {Identificacao} tomou {quantidade} de dano. Vida: {vidaAtual.Value}");
+        vidaAtual.Value = Mathf.Clamp(vidaAtual.Value - quantidade, 0, vidaMaxima);
 
         if (vidaAtual.Value <= 0)
         {
@@ -62,28 +91,30 @@ public class NetworkHealth : NetworkBehaviour
     {
         if (ehMob)
         {
-            if (TryGetComponent<MobLoot>(out MobLoot mobLoot))
+            EntregarXpParaPlayers();
+
+            if (mobLoot != null)
             {
                 mobLoot.DroparItens(transform.position);
             }
 
             OnMobMorreu?.Invoke(this);
-            GetComponent<NetworkObject>().Despawn(true);
+            NetworkObject.Despawn(true);
         }
         else
         {
-            Debug.Log($"[Health] {Identificacao} morreu!");
             estaMorto.Value = true;
-            NotificarMorteClientRpc();
         }
     }
 
-    [ClientRpc]
-    private void NotificarMorteClientRpc()
+    private void EntregarXpParaPlayers()
     {
-        if (IsOwner)
+        foreach (var client in NetworkManager.Singleton.ConnectedClientsList)
         {
-            ControlarPainelMorte(true);
+            if (client.PlayerObject != null && client.PlayerObject.TryGetComponent<PlayerStats>(out var stats))
+            {
+                stats.GanharXP(xpRecompensa);
+            }
         }
     }
 
@@ -92,84 +123,23 @@ public class NetworkHealth : NetworkBehaviour
     {
         if (!IsServer) return;
 
-        // 1. Pega a posição do PontoRespawn
-        Vector3 posicaoRespawn = Vector3.zero;
-        if (RespawnManager.Instance != null)
-        {
-            posicaoRespawn = RespawnManager.Instance.ObterPosicaoRespawn();
-        }
-        else
-        {
-            GameObject pontoObj = GameObject.Find("PontoRespawn");
-            posicaoRespawn = pontoObj != null ? pontoObj.transform.position : new Vector3(0f, 1f, 0f);
-        }
+        Vector3 posicaoRespawn = RespawnManager.Instance != null 
+            ? RespawnManager.Instance.ObterPosicaoRespawn() 
+            : new Vector3(0f, 1f, 0f);
 
-        // 2. Restaura vida e estado
         vidaAtual.Value = vidaMaxima;
         estaMorto.Value = false;
 
-        // 3. Teleporta no Servidor e avisa o Cliente Dono (corrige o Player 1 continuar no lugar de morte!)
-        ExecutarTeleporteFisico(posicaoRespawn);
+        if (playerMovimento != null) playerMovimento.Teleportar(posicaoRespawn);
         TeleportarClienteClientRpc(posicaoRespawn);
-
-        Debug.Log($"[Health] Player {gameObject.name} renasceu em {posicaoRespawn}.");
     }
 
     [ClientRpc]
     private void TeleportarClienteClientRpc(Vector3 novaPosicao)
     {
-        if (IsOwner)
+        if (IsOwner && !IsServer && playerMovimento != null)
         {
-            // Se for o Player 1 (Cliente), aplica o teleporte localmente também
-            if (!IsServer)
-            {
-                ExecutarTeleporteFisico(novaPosicao);
-            }
-
-            // Fecha a tela de morte
-            ControlarPainelMorte(false);
-        }
-    }
-
-    private void ExecutarTeleporteFisico(Vector3 novaPosicao)
-    {
-        CharacterController cc = GetComponent<CharacterController>();
-        NetworkTransform netTransform = GetComponent<NetworkTransform>();
-
-        if (cc != null) cc.enabled = false;
-
-        transform.position = novaPosicao;
-
-        if (netTransform != null && netTransform.CanCommitToTransform)
-        {
-            netTransform.Teleport(novaPosicao, transform.rotation, transform.localScale);
-        }
-
-        if (cc != null) cc.enabled = true;
-    }
-
-    // Controla o painel diretamente na cena sem depender de outro script no Prefab
-    private void ControlarPainelMorte(bool mostrar)
-    {
-        Canvas canvas = Object.FindAnyObjectByType<Canvas>();
-        if (canvas != null)
-        {
-            Transform painel = canvas.transform.Find("PainelMorte");
-            if (painel != null)
-            {
-                painel.gameObject.SetActive(mostrar);
-
-                // Se estiver abrindo o painel, já garante que o botão funcione
-                if (mostrar)
-                {
-                    UnityEngine.UI.Button btn = painel.GetComponentInChildren<UnityEngine.UI.Button>();
-                    if (btn != null)
-                    {
-                        btn.onClick.RemoveAllListeners();
-                        btn.onClick.AddListener(() => SolicitarRespawnServerRpc());
-                    }
-                }
-            }
+            playerMovimento.Teleportar(novaPosicao);
         }
     }
 }

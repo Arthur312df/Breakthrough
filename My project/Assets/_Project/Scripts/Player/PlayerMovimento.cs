@@ -1,4 +1,5 @@
 using Unity.Netcode;
+using Unity.Netcode.Components;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -8,45 +9,42 @@ public class PlayerMovimento : NetworkBehaviour
     [SerializeField] private float velocidade = 6f;
 
     private CharacterController controle;
-    private float velocidadeVertical;
+    private NetworkTransform networkTransform;
     private NetworkHealth networkHealth;
+    private float velocidadeVertical;
 
     private void Awake()
     {
+        // Cache de todos os componentes uma única vez
         controle = GetComponent<CharacterController>();
+        networkTransform = GetComponent<NetworkTransform>();
+        networkHealth = GetComponent<NetworkHealth>();
     }
 
     public override void OnNetworkSpawn()
     {
         base.OnNetworkSpawn();
-        TryGetComponent(out networkHealth);
 
         Debug.Log($"[Player] Nasceu: {name} | Dono: {OwnerClientId} | Sou o dono: {IsOwner}");
 
-        // Cada jogador nasce em um lugar diferente para não ficarem um dentro do outro
+        // Posiciona cada jogador separado ao nascer usando o método seguro de teleporte
         if (IsOwner)
         {
-            controle.enabled = false;
-            transform.position = new Vector3(OwnerClientId * 2f, 1f, 0f);
-            controle.enabled = true;
+            Vector3 posicaoInicial = new Vector3(OwnerClientId * 2f, 1f, 0f);
+            Teleportar(posicaoInicial);
         }
     }
 
     private void Update()
     {
-        // Só o dono deste personagem controla ele
         if (!IsOwner) return;
 
-        // Se houver o componente NetworkHealth e ele estiver morto, impede de andar imediatamente
-        if (networkHealth != null && networkHealth.estaMorto.Value)
-        {
-            return; // Para a execução do movimento aqui antes de processar qualquer tecla
-        }
+        // Se estiver morto, bloqueia o movimento imediatamente
+        if (networkHealth != null && networkHealth.estaMorto.Value) return;
 
         Vector2 entrada = LerEntrada();
         Vector3 direcao = new Vector3(entrada.x, 0f, entrada.y);
 
-        // Gravidade simples
         if (controle.isGrounded)
             velocidadeVertical = -1f;
         else
@@ -57,9 +55,24 @@ public class PlayerMovimento : NetworkBehaviour
 
         controle.Move(movimento * Time.deltaTime);
 
-        // Vira o personagem para a direção que está andando
         if (direcao.sqrMagnitude > 0.01f)
             transform.forward = direcao;
+    }
+
+    // Método centralizado para teletransportar sem conflito com CharacterController ou NetworkTransform
+    public void Teleportar(Vector3 novaPosicao)
+    {
+        if (controle != null) controle.enabled = false;
+
+        velocidadeVertical = 0f;
+        transform.position = novaPosicao;
+
+        if (networkTransform != null && networkTransform.CanCommitToTransform)
+        {
+            networkTransform.Teleport(novaPosicao, transform.rotation, transform.localScale);
+        }
+
+        if (controle != null) controle.enabled = true;
     }
 
     private Vector2 LerEntrada()
