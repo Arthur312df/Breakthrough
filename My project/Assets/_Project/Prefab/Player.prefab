@@ -247,9 +247,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerAtaque
   ShowTopMostFoldoutHeaderGroup: 1
-  alcanceAtaque: 2
+  estiloCombate: 1
   danoBase: 25
   tempoEntreAtaques: 0.4
+  alcanceMelee: 3
+  anguloConeMelee: 120
+  prefabProjetil: {fileID: 5047627362964845865, guid: 5b20c26fced431b479a2e28d2772137b, type: 3}
+  velocidadeProjetil: 16
+  alturaDisparo: 1
 --- !u!114 &5637753668908011978
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -263,9 +268,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NetworkHealth
   ShowTopMostFoldoutHeaderGroup: 1
-  vidaMaxima: 100
+  vidaMaximaInicial: 100
   ehMob: 0
   xpRecompensa: 40
+  vidaMaxima:
+    UpdateTraits:
+      MinSecondsBetweenUpdates: 0
+      MaxSecondsBetweenUpdates: 0
+    m_InternalValue: 100
   vidaAtual:
     UpdateTraits:
       MinSecondsBetweenUpdates: 0
@@ -349,8 +359,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerInventory
   ShowTopMostFoldoutHeaderGroup: 1
-  capacidadeMaxima: 20
-  slots:
+  quantidadeOuro:
     UpdateTraits:
       MinSecondsBetweenUpdates: 0
       MaxSecondsBetweenUpdates: 0
+    m_InternalValue: 0

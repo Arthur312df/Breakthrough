@@ -6,8 +6,9 @@ public class NetworkHealth : NetworkBehaviour
 {
     [SerializeField] private int vidaMaximaInicial = 100;
     
-    [Header("Configuração de Entidade")]
+ [Header("Configuração de Entidade")]
     [SerializeField] private bool ehMob = false;
+    public bool EhMob => ehMob; // <-- Linha adicionada para o PlayerAtaque saber se o alvo é um Mob
     [SerializeField] private int xpRecompensa = 40;
 
     public NetworkVariable<int> vidaMaxima = new NetworkVariable<int>(
