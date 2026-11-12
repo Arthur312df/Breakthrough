@@ -204,7 +204,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::MobCombat
   ShowTopMostFoldoutHeaderGroup: 1
   alcanceAtaque: 1.5
-  danoMob: 50
+  danoMob: 10
   intervaloAtaque: 3
 --- !u!114 &2019132684142619746
 MonoBehaviour:
@@ -219,8 +219,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NetworkHealth
   ShowTopMostFoldoutHeaderGroup: 1
-  vidaMaxima: 100
+  vidaMaximaInicial: 100
   ehMob: 1
+  xpRecompensa: 40
+  vidaMaxima:
+    UpdateTraits:
+      MinSecondsBetweenUpdates: 0
+      MaxSecondsBetweenUpdates: 0
+    m_InternalValue: 100
   vidaAtual:
     UpdateTraits:
       MinSecondsBetweenUpdates: 0

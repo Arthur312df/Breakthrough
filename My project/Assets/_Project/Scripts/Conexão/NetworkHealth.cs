@@ -4,11 +4,17 @@ using UnityEngine;
 
 public class NetworkHealth : NetworkBehaviour
 {
-    [SerializeField] private int vidaMaxima = 100;
+    [SerializeField] private int vidaMaximaInicial = 100;
     
     [Header("Configuração de Entidade")]
     [SerializeField] private bool ehMob = false;
     [SerializeField] private int xpRecompensa = 40;
+
+    public NetworkVariable<int> vidaMaxima = new NetworkVariable<int>(
+        100, 
+        NetworkVariableReadPermission.Everyone, 
+        NetworkVariableWritePermission.Server
+    );
 
     public NetworkVariable<int> vidaAtual = new NetworkVariable<int>(
         100, 
@@ -40,7 +46,8 @@ public class NetworkHealth : NetworkBehaviour
     {
         if (IsServer)
         {
-            vidaAtual.Value = vidaMaxima;
+            vidaMaxima.Value = vidaMaximaInicial;
+            vidaAtual.Value = vidaMaximaInicial;
             estaMorto.Value = false;
         }
 
@@ -68,10 +75,10 @@ public class NetworkHealth : NetworkBehaviour
     {
         if (!IsServer) return;
 
-        vidaMaxima = novaVidaMaxima;
+        vidaMaxima.Value = novaVidaMaxima;
         if (curarTotalmente)
         {
-            vidaAtual.Value = vidaMaxima;
+            vidaAtual.Value = vidaMaxima.Value;
         }
     }
 
@@ -79,7 +86,7 @@ public class NetworkHealth : NetworkBehaviour
     {
         if (!IsServer || estaMorto.Value) return;
 
-        vidaAtual.Value = Mathf.Clamp(vidaAtual.Value - quantidade, 0, vidaMaxima);
+        vidaAtual.Value = Mathf.Clamp(vidaAtual.Value - quantidade, 0, vidaMaxima.Value);
 
         if (vidaAtual.Value <= 0)
         {
@@ -127,7 +134,7 @@ public class NetworkHealth : NetworkBehaviour
             ? RespawnManager.Instance.ObterPosicaoRespawn() 
             : new Vector3(0f, 1f, 0f);
 
-        vidaAtual.Value = vidaMaxima;
+        vidaAtual.Value = vidaMaxima.Value;
         estaMorto.Value = false;
 
         if (playerMovimento != null) playerMovimento.Teleportar(posicaoRespawn);

@@ -1,24 +1,24 @@
 using Unity.Netcode;
 using UnityEngine;
 
-public class ItemCoativel : NetworkBehaviour
+public class ItemCoativel : MonoBehaviour
 {
-    [SerializeField] private int valorOuro = 10;
+    [SerializeField] private int quantidadeOuro = 10;
 
     private void OnTriggerEnter(Collider other)
     {
-        // A coleta de itens deve ser processada exclusivamente pelo Servidor
-        if (!IsServer) return;
-
-        // Verifica se o objeto que encostou é um Player
-        if (other.TryGetComponent<PlayerMovimento>(out _) || other.CompareTag("Player"))
+        if (other.TryGetComponent<NetworkObject>(out var netObj))
         {
-            if (other.TryGetComponent<NetworkObject>(out NetworkObject playerNetObj))
+            if (netObj.IsOwner && other.TryGetComponent<PlayerInventory>(out var inventario))
             {
-                Debug.Log($"[Loot] Player ID {playerNetObj.OwnerClientId} coletou {valorOuro} de ouro!");
+                inventario.AdicionarOuroServerRpc(quantidadeOuro);
+                Debug.Log($"[Loot] Player ID {netObj.OwnerClientId} coletou {quantidadeOuro} de ouro!");
                 
-                // Destrói o item da rede (despawn)
-                GetComponent<NetworkObject>().Despawn(true);
+                // Destrói o item no mundo (apenas o servidor comanda a destruição de objetos de rede)
+                if (NetworkManager.Singleton.IsServer)
+                {
+                    GetComponent<NetworkObject>().Despawn();
+                }
             }
         }
     }
