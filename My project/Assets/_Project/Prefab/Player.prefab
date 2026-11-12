@@ -248,7 +248,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerAtaque
   ShowTopMostFoldoutHeaderGroup: 1
   alcanceAtaque: 2
-  danoAtaque: 25
+  danoBase: 25
+  tempoEntreAtaques: 0.4
 --- !u!114 &5637753668908011978
 MonoBehaviour:
   m_ObjectHideFlags: 0

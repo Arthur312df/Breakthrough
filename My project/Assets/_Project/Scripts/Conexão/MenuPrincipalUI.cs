@@ -1,63 +1,92 @@
+using TMPro;
+using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using TMPro; // Caso use TextMeshPro Dropdown
+using UnityEngine.UI;
 
 public class MenuPrincipalUI : MonoBehaviour
 {
     [Header("Painéis da UI")]
-    [SerializeField] private GameObject painelTitulo;
-    [SerializeField] private GameObject painelSelecao;
+    [SerializeField] private GameObject painelRedeRelay;         
+    [SerializeField] private GameObject painelSelecaoPersonagem; 
 
-    [Header("Configuração da Cena do Jogo")]
-    [SerializeField] private string nomeCenaJogo = "Cena_Teste";
+    [Header("Elementos de Texto")]
+    [SerializeField] private TMP_InputField inputCodigoSala; 
+    [SerializeField] private TMP_Text textoStatusRede;     
+    [SerializeField] private TMP_Text textoCodigoGerado;   
+
+    [Header("Configuração de Cenas")]
+    [SerializeField] private string nomeCenaDoJogo = "Cena_Teste"; 
 
     private void Start()
     {
-        // Garante que começa na tela de Start
-        if (painelTitulo != null) painelTitulo.SetActive(true);
-        if (painelSelecao != null) painelSelecao.SetActive(false);
+        // Garante estado limpo ao abrir o menu: Mostra rede, oculta seleção
+        if (painelRedeRelay != null) painelRedeRelay.SetActive(true);
+        if (painelSelecaoPersonagem != null) painelSelecaoPersonagem.SetActive(false);
     }
 
-    // --- TELA 1: START E SERVIDOR ---
-
-    // Vincule no OnValueChanged de um Dropdown no cantinho da tela (0 = Host, 1 = Client)
-    public void EscolherModoServidor(int indice)
+    public async void AoClicarCriarSala()
     {
-        DadosSessao.IniciarComoHost = (indice == 0);
-        Debug.Log($"[Menu] Modo selecionado: {(DadosSessao.IniciarComoHost ? "Host (Criar)" : "Client (Entrar)")}");
+        if (textoStatusRede != null) textoStatusRede.text = "Criando sala na nuvem...";
+        
+        string codigoSala = await ServicoRedeRelay.Instance.CriarSalaRelay();
+
+        if (!string.IsNullOrEmpty(codigoSala))
+        {
+            if (textoStatusRede != null) textoStatusRede.text = "Sala criada com sucesso!";
+            if (textoCodigoGerado != null) textoCodigoGerado.text = $"Código: {codigoSala}";
+            
+            // Aguarda 1.5s para o player ver o código e avança para a escolha do herói
+            Invoke(nameof(AvancarParaSelecaoPersonagem), 1.5f);
+        }
+        else
+        {
+            if (textoStatusRede != null) textoStatusRede.text = "Falha ao criar sala!";
+        }
     }
 
-    // Alternativa caso prefira dois botões ou Toggle no cantinho em vez de Dropdown
-    public void DefinirComoHost(bool ehHost)
+    public async void AoClicarEntrarSala()
     {
-        DadosSessao.IniciarComoHost = ehHost;
+        string codigoDigitado = inputCodigoSala != null ? inputCodigoSala.text.Trim() : "";
+
+        if (string.IsNullOrEmpty(codigoDigitado))
+        {
+            if (textoStatusRede != null) textoStatusRede.text = "Digite o código da sala!";
+            return;
+        }
+
+        if (textoStatusRede != null) textoStatusRede.text = $"Conectando à sala {codigoDigitado}...";
+
+        bool sucesso = await ServicoRedeRelay.Instance.EntrarSalaRelay(codigoDigitado);
+
+        if (sucesso)
+        {
+            if (textoStatusRede != null) textoStatusRede.text = "Conectado!";
+            AvancarParaSelecaoPersonagem();
+        }
+        else
+        {
+            if (textoStatusRede != null) textoStatusRede.text = "Código inválido ou sala cheia!";
+        }
     }
 
-    // Vincule no botão "Start" da primeira tela
-    public void ClicarBotaoStart()
+    private void AvancarParaSelecaoPersonagem()
     {
-        painelTitulo.SetActive(false);
-        painelSelecao.SetActive(true);
+        // Desativa totalmente o painel de rede e ativa o de seleção
+        if (painelRedeRelay != null) painelRedeRelay.SetActive(false);
+        if (painelSelecaoPersonagem != null) painelSelecaoPersonagem.SetActive(true);
     }
 
-    // --- TELA 2: SELEÇÃO DE PERSONAGEM ---
-
-    // Vincule nos botões de cada personagem (passe 0, 1, 2 no Inspector do botão)
-    public void SelecionarPersonagem(int idPersonagem)
+    public void AoClicarIniciarJogoNaCenaTeste()
     {
-        DadosSessao.IdPersonagemEscolhido = idPersonagem;
-        Debug.Log($"[Menu] Personagem ID {idPersonagem} selecionado.");
-    }
-
-    public void VoltarParaTitulo()
-    {
-        painelSelecao.SetActive(false);
-        painelTitulo.SetActive(true);
-    }
-
-    // Vincule no botão "Iniciar" da tela de seleção de personagem
-    public void ClicarBotaoIniciarJogo()
-    {
-        SceneManager.LoadScene(nomeCenaJogo);
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer)
+        {
+            Debug.Log($"[Rede] Host carregando a cena {nomeCenaDoJogo} para todos...");
+            NetworkManager.Singleton.SceneManager.LoadScene(nomeCenaDoJogo, LoadSceneMode.Single);
+        }
+        else
+        {
+            SceneManager.LoadScene(nomeCenaDoJogo);
+        }
     }
 }
