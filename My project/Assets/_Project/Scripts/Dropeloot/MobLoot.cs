@@ -8,16 +8,19 @@ public class MobLoot : NetworkBehaviour
     [SerializeField] private GameObject prefabEspada;
 
     [Header("Chances de Drop (0 a 100%)")]
-    [Range(0, 100)] [SerializeField] private int chanceDropEspada = 30; // 30% de chance
+    [Range(0, 100)] [SerializeField] private int chanceDropEspada = 30;
+
+    private readonly RaycastHit[] bufferChao = new RaycastHit[10];
 
     public void DroparItens(Vector3 posicaoMorte)
     {
-        // O drop de loot deve ser executado exclusivamente pelo Servidor
         if (!IsServer) return;
 
-        Vector3 posicaoDrop = posicaoMorte + Vector3.up * 0.5f;
+        // Descobre onde está o chão embaixo do Mob para não spawnar no alto
+        float alturaChao = ObterAlturaDoChao(posicaoMorte);
+        Vector3 posicaoDrop = new Vector3(posicaoMorte.x, alturaChao + 1.0f, posicaoMorte.z);
 
-        // Drop de Ouro (Ex: ID do item Ouro = 1)
+        // Drop de Ouro
         if (prefabOuro != null)
         {
             GameObject ouro = Instantiate(prefabOuro, posicaoDrop, Quaternion.identity);
@@ -27,11 +30,11 @@ public class MobLoot : NetworkBehaviour
             }
         }
 
-        // Drop de Espada baseado em porcentagem inteira (Ex: ID do item Espada = 2)
+        // Drop de Espada baseado em porcentagem inteira
         int sorteio = Random.Range(0, 100);
         if (prefabEspada != null && sorteio < chanceDropEspada)
         {
-            Vector3 posicaoEspada = posicaoDrop + new Vector3(0.5f, 0f, 0f);
+            Vector3 posicaoEspada = posicaoDrop + new Vector3(0.6f, 0f, 0f);
             GameObject espada = Instantiate(prefabEspada, posicaoEspada, Quaternion.identity);
             if (espada.TryGetComponent<NetworkObject>(out NetworkObject netEspada))
             {
@@ -39,5 +42,25 @@ public class MobLoot : NetworkBehaviour
             }
             Debug.Log("[Loot] O mob dropou uma espada!");
         }
+    }
+
+    private float ObterAlturaDoChao(Vector3 origem)
+    {
+        Vector3 topoRaio = origem + Vector3.up * 3f;
+        int hits = Physics.RaycastNonAlloc(topoRaio, Vector3.down, bufferChao, 20f, ~0, QueryTriggerInteraction.Ignore);
+
+        for (int i = 0; i < hits; i++)
+        {
+            Collider col = bufferChao[i].collider;
+            if (col.gameObject == gameObject) continue;
+            if (col.GetComponent<NetworkHealth>() != null) continue;
+            if (col.GetComponent<ItemCoativel>() != null) continue;
+            if (col.GetComponent<ProjetilCombate>() != null) continue;
+
+            return bufferChao[i].point.y;
+        }
+
+        // Fallback: usa a base da escala do Mob caso não ache colisor de chão
+        return origem.y - (transform.localScale.y * 0.5f);
     }
 }

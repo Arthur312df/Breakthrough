@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 78a6fc0a8c38fa34993c5a8bc174a78d, type: 3}
+  m_Name: Prey1
+  m_EditorClassIdentifier: Assembly-CSharp::PreyWoundsData
+  duracaoPrey: 8
+  multiplicadorDanoPrey: 1.25
+  maxStacksWounds: 5
+  duracaoWounds: 6
+  danoBonusPorWound: 5
+  danoRupturaPorStack: 35
+  estourarAoAtingirMaximo: 0

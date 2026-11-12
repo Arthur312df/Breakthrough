@@ -8,6 +8,10 @@ public class PlayerStats : NetworkBehaviour
     [SerializeField] private int vidaBase = 100;
     [SerializeField] private int manaBase = 50;
 
+    [Header("Regeneração de Mana")]
+    [SerializeField] private int regenManaPorCiclo = 1;
+    [SerializeField] private float intervaloRegenSegundos = 2.5f;
+
     // --- NÍVEL E EXPERIÊNCIA ---
     public NetworkVariable<int> nivel = new NetworkVariable<int>(1, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     public NetworkVariable<int> xpAtual = new NetworkVariable<int>(0, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
@@ -17,7 +21,7 @@ public class PlayerStats : NetworkBehaviour
     public NetworkVariable<int> manaMaxima = new NetworkVariable<int>(50, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     public NetworkVariable<int> manaAtual = new NetworkVariable<int>(50, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
-    // --- ATRIBUTOS (Começam em 10 -> 11 -> 12...) ---
+    // --- ATRIBUTOS ---
     public NetworkVariable<int> forca = new NetworkVariable<int>(10, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     public NetworkVariable<int> agilidade = new NetworkVariable<int>(10, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     public NetworkVariable<int> inteligencia = new NetworkVariable<int>(10, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
@@ -27,6 +31,7 @@ public class PlayerStats : NetworkBehaviour
     public event Action OnStatsAtualizados;
 
     private NetworkHealth networkHealth;
+    private float timerRegenMana;
 
     private void Awake()
     {
@@ -38,15 +43,62 @@ public class PlayerStats : NetworkBehaviour
         if (IsServer)
         {
             RecalcularAtributosDerivados(true);
+
+            if (networkHealth != null)
+            {
+                networkHealth.estaMorto.OnValueChanged += AoMudarEstadoMorteServidor;
+            }
         }
 
         if (IsOwner)
         {
             nivel.OnValueChanged += (_, _) => OnStatsAtualizados?.Invoke();
             xpAtual.OnValueChanged += (_, _) => OnStatsAtualizados?.Invoke();
+            xpProximoNivel.OnValueChanged += (_, _) => OnStatsAtualizados?.Invoke();
             manaAtual.OnValueChanged += (_, _) => OnStatsAtualizados?.Invoke();
+            manaMaxima.OnValueChanged += (_, _) => OnStatsAtualizados?.Invoke();
 
             OnPlayerStatsLocalSpawnou?.Invoke(this);
+        }
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        if (IsServer && networkHealth != null)
+        {
+            networkHealth.estaMorto.OnValueChanged -= AoMudarEstadoMorteServidor;
+        }
+    }
+
+    private void AoMudarEstadoMorteServidor(bool estavaMorto, bool mortoAgora)
+    {
+        if (estavaMorto && !mortoAgora)
+        {
+            manaAtual.Value = manaMaxima.Value;
+        }
+    }
+
+    private void Update()
+    {
+        if (!IsServer) return;
+        if (networkHealth != null && networkHealth.estaMorto.Value) return;
+
+        if (manaAtual.Value < manaMaxima.Value)
+        {
+            timerRegenMana += Time.deltaTime;
+            if (timerRegenMana >= intervaloRegenSegundos)
+            {
+                timerRegenMana = 0f;
+                
+                int bonusInteligencia = Mathf.Max(0, (inteligencia.Value - 10) / 5);
+                int ganhoTotal = regenManaPorCiclo + bonusInteligencia;
+
+                manaAtual.Value = Mathf.Clamp(manaAtual.Value + ganhoTotal, 0, manaMaxima.Value);
+            }
+        }
+        else
+        {
+            timerRegenMana = 0f;
         }
     }
 

@@ -9,10 +9,11 @@ public class ProjetilCombate : MonoBehaviour
     private bool disparadoPorPlayer;
     private bool ehServidor;
     private ulong idAtirador;
+    private SkillData skillOrigem;
 
     [SerializeField] private float tempoDeVida = 4f;
 
-    public void Inicializar(Vector3 dir, float vel, int danoCausado, bool origemPlayer, bool rodarLogicaNoServidor, ulong atiradorId = 0)
+    public void Inicializar(Vector3 dir, float vel, int danoCausado, bool origemPlayer, bool rodarLogicaNoServidor, ulong atiradorId = 0, SkillData skill = null)
     {
         direcao = dir.normalized;
         direcao.y = 0f; // Trajetória plana para o Top-Down Isométrico
@@ -21,6 +22,7 @@ public class ProjetilCombate : MonoBehaviour
         disparadoPorPlayer = origemPlayer;
         ehServidor = rodarLogicaNoServidor;
         idAtirador = atiradorId;
+        skillOrigem = skill;
 
         if (direcao != Vector3.zero)
         {
@@ -55,8 +57,16 @@ public class ProjetilCombate : MonoBehaviour
                 bool alvoEhMob = alvoHealth.EhMob;
                 if (disparadoPorPlayer == alvoEhMob)
                 {
-                    alvoHealth.TomarDano(dano);
-                    Debug.Log($"[Combate Ranged] Projétil atingiu {other.name} causando {dano} de dano!");
+                    if (disparadoPorPlayer)
+                    {
+                        PlayerSkills.AplicarDanoEEfeitosNoAlvo(alvoHealth, skillOrigem, dano);
+                    }
+                    else
+                    {
+                        alvoHealth.TomarDano(dano);
+                    }
+
+                    Debug.Log($"[Combate Ranged] Projétil atingiu {other.name} causando {dano} de dano base!");
                 }
             }
         }

@@ -6,9 +6,9 @@ public class NetworkHealth : NetworkBehaviour
 {
     [SerializeField] private int vidaMaximaInicial = 100;
     
- [Header("Configuração de Entidade")]
+    [Header("Configuração de Entidade")]
     [SerializeField] private bool ehMob = false;
-    public bool EhMob => ehMob; // <-- Linha adicionada para o PlayerAtaque saber se o alvo é um Mob
+    public bool EhMob => ehMob;
     [SerializeField] private int xpRecompensa = 40;
 
     public NetworkVariable<int> vidaMaxima = new NetworkVariable<int>(
@@ -29,7 +29,6 @@ public class NetworkHealth : NetworkBehaviour
         NetworkVariableWritePermission.Server
     );
 
-    // Eventos limpos para o Mundo/UI escutarem
     public Action<NetworkHealth> OnMobMorreu;
     public static event Action<NetworkHealth> OnPlayerLocalSpawnou;
     public event Action<bool> OnEstadoMorteLocalMudou;
@@ -97,6 +96,10 @@ public class NetworkHealth : NetworkBehaviour
 
     private void Morrer()
     {
+        // Trava dupla para evitar chamadas duplicadas no mesmo frame
+        if (estaMorto.Value) return;
+        estaMorto.Value = true;
+
         if (ehMob)
         {
             EntregarXpParaPlayers();
@@ -108,10 +111,6 @@ public class NetworkHealth : NetworkBehaviour
 
             OnMobMorreu?.Invoke(this);
             NetworkObject.Despawn(true);
-        }
-        else
-        {
-            estaMorto.Value = true;
         }
     }
 
