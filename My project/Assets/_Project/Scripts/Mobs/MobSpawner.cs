@@ -2,39 +2,43 @@ using System.Collections;
 using Unity.Netcode;
 using UnityEngine;
 
-public class MobSpawner : NetworkBehaviour
+public class MobSpawner : MonoBehaviour
 {
-    [SerializeField] private NetworkObject mobPrefab;
+    [Header("Configurações do Spawner")]
+    [SerializeField] private GameObject mobPrefab;
     [SerializeField] private int quantidadeMaxima = 3;
-    [SerializeField] private float raio = 6f;
-    [SerializeField] private float tempoRespawn = 5f; // Tempo em segundos para o mob renascer
+    [SerializeField] private float raioDeSpawn = 8f;
+    [SerializeField] private float tempoDeRespawn = 5f;
+
+    private bool spawnerIniciado = false;
 
     private void Start()
     {
-        if (NetworkManager.Singleton == null)
+        if (NetworkManager.Singleton != null)
         {
-            Debug.LogError("[Spawner] Não existe NetworkManager na cena.");
-            return;
+            NetworkManager.Singleton.OnServerStarted += AoIniciarServidor;
+
+            // Se o servidor já foi iniciado pelo Menu antes deste Start rodar, cria os mobs imediatamente!
+            if (NetworkManager.Singleton.IsServer)
+            {
+                AoIniciarServidor();
+            }
         }
-
-        // Só dispara quando o servidor (ou Host) liga
-        NetworkManager.Singleton.OnServerStarted += AoIniciarServidor;
     }
 
-    public override void OnDestroy()
+    private void OnDestroy()
     {
-        base.OnDestroy();
-
-        if (NetworkManager.Singleton == null) return;
-        NetworkManager.Singleton.OnServerStarted -= AoIniciarServidor;
+        if (NetworkManager.Singleton != null)
+        {
+            NetworkManager.Singleton.OnServerStarted -= AoIniciarServidor;
+        }
     }
+
     private void AoIniciarServidor()
     {
-        if (mobPrefab == null)
-        {
-            Debug.LogError("[Spawner] O prefab do Mob não foi atribuído.");
-            return;
-        }
+        // Trava para garantir que não vai criar mobs duplicados
+        if (spawnerIniciado) return;
+        spawnerIniciado = true;
 
         for (int i = 0; i < quantidadeMaxima; i++)
         {
@@ -44,42 +48,45 @@ public class MobSpawner : NetworkBehaviour
 
     private void CriarMob()
     {
-        float alturaBase = 1.0f; // Ajuste conforme a base do seu mob
+        if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsServer) return;
 
-        Vector3 posicao = new Vector3(
-            Random.Range(-raio, raio),
-            alturaBase, 
-            Random.Range(3f, raio + 3f));
-
-        NetworkObject mobInstance = Instantiate(mobPrefab, posicao, Quaternion.identity);
-        mobInstance.Spawn(); // cria o inimigo para todos os jogadores
-
-        // Se o mob tiver o componente NetworkHealth, inscrevemos no evento de morte
-        if (mobInstance.TryGetComponent<NetworkHealth>(out NetworkHealth health))
+        if (mobPrefab == null)
         {
-            health.OnMobMorreu += HandleMobMorreu;
+            Debug.LogError("[Spawner] Mob Prefab não foi atribuído no Inspector do MobSpawner!");
+            return;
         }
 
-        Debug.Log($"[Spawner] Mob criado em {posicao}");
-    }
+        Vector2 pontoAleatorio = Random.insideUnitCircle * raioDeSpawn;
+        Vector3 posicaoSpawn = transform.position + new Vector3(pontoAleatorio.x, 1f, pontoAleatorio.y);
 
-    private void HandleMobMorreu(NetworkHealth mobMorto)
-    {
-        // Remove a assinatura para evitar vazamento de memória
-        mobMorto.OnMobMorreu -= HandleMobMorreu;
+        GameObject novoMob = Instantiate(mobPrefab, posicaoSpawn, Quaternion.identity);
 
-        // Inicia a contagem para nascer um novo mob no lugar
-        StartCoroutine(EsperaERenascer());
-    }
-
-    private IEnumerator EsperaERenascer()
-    {
-        yield return new WaitForSeconds(tempoRespawn);
-        
-        // Garante que o servidor ainda está ativo antes de spawnar
-        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer)
+        if (novoMob.TryGetComponent<NetworkObject>(out var netObj))
         {
-            CriarMob();
+            netObj.Spawn(true);
         }
+
+        if (novoMob.TryGetComponent<NetworkHealth>(out var health))
+        {
+            health.OnMobMorreu += AoMobMorrer;
+        }
+
+        Debug.Log($"[Spawner] Mob criado em {posicaoSpawn}");
+    }
+
+    private void AoMobMorrer(NetworkHealth mobMorto)
+    {
+        mobMorto.OnMobMorreu -= AoMobMorrer;
+
+        if (gameObject.activeInHierarchy)
+        {
+            StartCoroutine(RespawnarMobCoroutine());
+        }
+    }
+
+    private IEnumerator RespawnarMobCoroutine()
+    {
+        yield return new WaitForSeconds(tempoDeRespawn);
+        CriarMob();
     }
 }

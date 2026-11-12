@@ -9,29 +9,39 @@ public class PlayerMovimento : NetworkBehaviour
 
     private CharacterController controle;
     private float velocidadeVertical;
+    private NetworkHealth networkHealth;
 
     private void Awake()
     {
         controle = GetComponent<CharacterController>();
     }
 
-  public override void OnNetworkSpawn()
-{
-    Debug.Log($"[Player] Nasceu: {name} | Dono: {OwnerClientId} | Sou o dono: {IsOwner}");
-
-    // Cada jogador nasce em um lugar diferente para não ficarem um dentro do outro
-    if (IsOwner)
+    public override void OnNetworkSpawn()
     {
-        controle.enabled = false;
-        transform.position = new Vector3(OwnerClientId * 2f, 1f, 0f);
-        controle.enabled = true;
+        base.OnNetworkSpawn();
+        TryGetComponent(out networkHealth);
+
+        Debug.Log($"[Player] Nasceu: {name} | Dono: {OwnerClientId} | Sou o dono: {IsOwner}");
+
+        // Cada jogador nasce em um lugar diferente para não ficarem um dentro do outro
+        if (IsOwner)
+        {
+            controle.enabled = false;
+            transform.position = new Vector3(OwnerClientId * 2f, 1f, 0f);
+            controle.enabled = true;
+        }
     }
-}
 
     private void Update()
     {
         // Só o dono deste personagem controla ele
         if (!IsOwner) return;
+
+        // Se houver o componente NetworkHealth e ele estiver morto, impede de andar imediatamente
+        if (networkHealth != null && networkHealth.estaMorto.Value)
+        {
+            return; // Para a execução do movimento aqui antes de processar qualquer tecla
+        }
 
         Vector2 entrada = LerEntrada();
         Vector3 direcao = new Vector3(entrada.x, 0f, entrada.y);

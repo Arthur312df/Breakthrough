@@ -204,7 +204,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::MobCombat
   ShowTopMostFoldoutHeaderGroup: 1
   alcanceAtaque: 1.5
-  danoMob: 10
+  danoMob: 50
   intervaloAtaque: 3
 --- !u!114 &2019132684142619746
 MonoBehaviour:
@@ -220,14 +220,17 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::NetworkHealth
   ShowTopMostFoldoutHeaderGroup: 1
   vidaMaxima: 100
-  prefabOuro: {fileID: 7818738400309591694, guid: 2f5df1570a0b7cc4783c7830aa8bf433, type: 3}
-  prefabEspada: {fileID: 0}
   ehMob: 1
   vidaAtual:
     UpdateTraits:
       MinSecondsBetweenUpdates: 0
       MaxSecondsBetweenUpdates: 0
     m_InternalValue: 100
+  estaMorto:
+    UpdateTraits:
+      MinSecondsBetweenUpdates: 0
+      MaxSecondsBetweenUpdates: 0
+    m_InternalValue: 0
 --- !u!114 &3279069226067271975
 MonoBehaviour:
   m_ObjectHideFlags: 0

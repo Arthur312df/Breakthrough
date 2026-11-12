@@ -15,6 +15,11 @@ public class PlayerAtaque : NetworkBehaviour
             Debug.Log($"[Player {OwnerClientId}] Tecla de ataque pressionada!");
             AtacarServerRpc();
         }
+        // Impede de atacar se estiver morto
+        if (TryGetComponent<NetworkHealth>(out var health) && health.estaMorto.Value)
+        {
+        return;
+        }
     }
 
     [ServerRpc]

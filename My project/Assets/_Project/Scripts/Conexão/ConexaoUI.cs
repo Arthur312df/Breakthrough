@@ -1,27 +1,46 @@
 using Unity.Netcode;
+using Unity.Netcode.Transports.UTP;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class ConexaoUI : MonoBehaviour
 {
-   private void Start()
+    private void Start()
     {
-        if (NetworkManager.Singleton == null)
-        {
-        Debug.LogError("[Rede] Não existe NetworkManager na cena. Adicione o componente NetworkManager ao objeto.");
-        return;
-        }
-
         Debug.Log("[Rede] ConexaoUI iniciou.");
 
-        // Avisa no Console quando alguém conecta ou desconecta
+        if (NetworkManager.Singleton == null) return;
+
         NetworkManager.Singleton.OnClientConnectedCallback += AoConectar;
         NetworkManager.Singleton.OnClientDisconnectCallback += AoDesconectar;
+
+        // Configura o IP e Porta escolhidos lá no menu (se houver UnityTransport)
+        if (NetworkManager.Singleton.TryGetComponent<UnityTransport>(out var transport))
+        {
+            transport.SetConnectionData(DadosSessao.EnderecoIP, DadosSessao.Porta);
+        }
+
+        // Inicia automaticamente de acordo com o que foi escolhido no Menu!
+        if (!NetworkManager.Singleton.IsClient && !NetworkManager.Singleton.IsServer)
+        {
+            if (DadosSessao.IniciarComoHost)
+            {
+                NetworkManager.Singleton.StartHost();
+            }
+            else
+            {
+                NetworkManager.Singleton.StartClient();
+            }
+        }
     }
+
     private void OnDestroy()
     {
-        if (NetworkManager.Singleton == null) return;
-        NetworkManager.Singleton.OnClientConnectedCallback -= AoConectar;
-        NetworkManager.Singleton.OnClientDisconnectCallback -= AoDesconectar;
+        if (NetworkManager.Singleton != null)
+        {
+            NetworkManager.Singleton.OnClientConnectedCallback -= AoConectar;
+            NetworkManager.Singleton.OnClientDisconnectCallback -= AoDesconectar;
+        }
     }
 
     private void AoConectar(ulong clientId)
@@ -36,37 +55,20 @@ public class ConexaoUI : MonoBehaviour
 
     private void OnGUI()
     {
-        GUILayout.BeginArea(new Rect(10, 10, 260, 300));
+        if (NetworkManager.Singleton == null) return;
 
-        NetworkManager rede = NetworkManager.Singleton;
+        GUILayout.BeginArea(new Rect(10, 10, 220, 100));
 
-        if (rede == null)
+        if (NetworkManager.Singleton.IsHost || NetworkManager.Singleton.IsClient)
         {
-            GUILayout.Label("NetworkManager não encontrado na cena!");
-            GUILayout.EndArea();
-            return;
-        }
+            string modo = NetworkManager.Singleton.IsHost ? "Host" : "Client";
+            GUILayout.Label($"Modo: {modo} | Classe ID: {DadosSessao.IdPersonagemEscolhido}");
 
-        if (!rede.IsClient && !rede.IsServer)
-        {
-            // Ainda não conectou: mostra os botões de entrada
-            if (GUILayout.Button("Host (criar sessão)", GUILayout.Height(40)))
-                rede.StartHost();
-
-            if (GUILayout.Button("Client (entrar)", GUILayout.Height(40)))
-                rede.StartClient();
-        }
-        else
-        {
-            // Já conectado: mostra o estado
-            string modo = rede.IsHost ? "Host" : (rede.IsServer ? "Servidor" : "Client");
-            GUILayout.Label($"Modo: {modo}");
-
-            if (rede.IsServer)
-                GUILayout.Label($"Jogadores conectados: {rede.ConnectedClientsIds.Count}");
-
-            if (GUILayout.Button("Desconectar", GUILayout.Height(40)))
-                rede.Shutdown();
+            if (GUILayout.Button("Desconectar / Menu"))
+            {
+                NetworkManager.Singleton.Shutdown();
+                SceneManager.LoadScene("Cena_Menu");
+            }
         }
 
         GUILayout.EndArea();
