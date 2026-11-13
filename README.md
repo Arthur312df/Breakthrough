@@ -101,14 +101,15 @@ O modelo é **servidor autoritativo** (o Host decide tudo), com uma exceção: o
 | Movimento dos Mobs | Servidor | `NetworkTransform` com `AuthorityMode: Server` |
 | Vida, mana, XP, nível, atributos, ouro | Servidor | `NetworkVariable` com escrita só no servidor |
 | Ataques e skills | Servidor | Cliente envia `ServerRpc` com a direção do mouse; servidor valida cooldown/mana e aplica dano |
-| Projéteis | Servidor (hit) / todos (visual) | **Não são NetworkObjects.** O servidor cria a cópia "real" que aplica dano; um `ClientRpc` cria cópias só visuais nos clientes |
+| Projéteis | Servidor (hit) / todos (visual) | **Não são NetworkObjects.** O servidor cria a cópia "real" que aplica dano; um `ClientRpc` cria cópias só visuais nos clientes. Cada projétil acerta no máximo um alvo (`jaAcertou`), atravessa cadáveres e triggers sem vida, e para em paredes |
 | Spawn de Player | Servidor | `GerenciadorSpawn` chama `SpawnAsPlayerObject` |
 | Spawn de Mobs e loot | Servidor | `MobSpawner` e `MobLoot` com `NetworkObject.Spawn` |
 
 Padrão usado nos scripts:
 - `if (!IsOwner) return;` no `Update` para ler input só no dono.
 - `if (!IsServer) return;` em toda lógica de jogo (IA, regen, dano).
-- RPCs no estilo novo do NGO 2.x: `[Rpc(SendTo.Server, InvokePermission = ...)]`. Os `ClientRpc` usam o atributo legado `[ClientRpc]`.
+- RPCs no estilo novo do NGO 2.x: `[Rpc(SendTo.Server, InvokePermission = ...)]` e `[Rpc(SendTo.Owner)]`. Alguns scripts (`PlayerAtaque`, `PlayerSkills`, `MobCombat`, `PlayerInventory`) ainda usam o atributo legado `[ClientRpc]`.
+- `NetworkHealth.TomarDano` ignora valores `<= 0`, para que um dano negativo não cure o alvo.
 - Buffers pré-alocados (`OverlapSphereNonAlloc`, `RaycastNonAlloc`) para evitar garbage collection.
 
 ---
@@ -138,19 +139,23 @@ sequenceDiagram
 ```
 
 Detalhes:
-- `ServicoRedeRelay` e o `NetworkManager` do menu ficam em `DontDestroyOnLoad` (`PersistirRede`), então sobrevivem à troca de cena.
+- `ServicoRedeRelay` e o `NetworkManager` do menu ficam em `DontDestroyOnLoad`, então sobrevivem à troca de cena. O `PersistirRede` é um singleton: se o jogador voltar ao menu, a cópia nova do NetworkManager é destruída.
+- O login começa em segundo plano no `Awake` (`GarantirLogin`). Criar e Entrar esperam por ele, e uma tentativa que falhou é refeita no próximo clique.
+- Há uma trava (`ocupado`) contra duplo clique em Criar/Entrar. Também há uma checagem que recusa criar ou entrar em sala se a rede já estiver ligada (`IsListening`).
+- O `NetworkManager` precisa ter o componente `UnityTransport`; se faltar, o serviço só registra um erro.
 - A sala aceita **4 jogadores** (host + 3), definido em `CriarSalaRelay(int maximoJogadores = 4)`.
-- O código digitado é convertido para maiúsculas antes do join.
+- O código digitado passa por `Trim()` e é convertido para maiúsculas antes do join.
+- O botão **Iniciar** só funciona no host. No cliente, ele mostra "Aguardando o Host iniciar o jogo...". Sem sala, mostra "Crie ou entre em uma sala antes de iniciar."
 - O botão "Desconectar / Menu" só existe no `ConexaoUI` (legado), não está na `Cena_Teste`.
 
 ### 2. Spawn do jogador
 
 1. `GerenciadorSpawn.Start` (só no servidor) assina `OnClientConnectedCallback` e spawna players para todos os clientes já conectados.
-2. Antes de instanciar, verifica se o cliente já tem um PlayerObject (evita duplicata).
-3. Instancia `Player.prefab` no `PlayerSpawnPoint` e chama `SpawnAsPlayerObject(clientId)`.
-4. Em `PlayerMovimento.OnNetworkSpawn`, o dono se teleporta para `(OwnerClientId * 2, 1, 0)` para os jogadores não nascerem sobrepostos. Isso **sobrescreve** a posição do `PlayerSpawnPoint`.
-5. `NetworkHealth`, `PlayerStats` e `PlayerInventory` disparam eventos estáticos/locais que o HUD e o `GerenciadorUI` usam para se ligar ao player local.
-6. `CameraSegue` procura o objeto com tag `Player` a cada frame até achar e passa a seguir com offset isométrico (56°, FOV 40, distância 19).
+2. Antes de instanciar, verifica se o cliente já tem um `PlayerObject` em `ConnectedClients`, para evitar duplicata.
+3. Instancia `Player.prefab` no `PlayerSpawnPoint`, deslocado em X por `(clientId % 4) × 1.5`, e chama `SpawnAsPlayerObject(clientId)`.
+4. Em seguida, em `PlayerMovimento.OnNetworkSpawn`, o dono se teleporta para `(OwnerClientId * 2, 1, 0)`. Isso **sobrescreve** a posição calculada no passo 3 (ver "Pontos de atenção").
+5. `NetworkHealth` guarda o player local em `NetworkHealth.PlayerLocal` e dispara `OnPlayerLocalSpawnou`. O `GerenciadorUI` usa os dois, então funciona mesmo se o player nascer antes da UI.
+6. `CameraSegue` procura entre os NetworkObjects spawnados aquele com tag `Player` e `IsOwner`, ou seja, o player **desta** tela. Depois segue com offset `(0, 12, -8)` e interpolação suave (`Lerp`, velocidade 5). A rotação da câmera vem da cena, não do script.
 
 ### 3. Loop de combate
 
@@ -241,9 +246,9 @@ O `MobSpawner` mantém 3 mobs num raio de 8 em torno de si e só começa quando 
 
 1. A vida chega a 0, então `estaMorto = true`. Movimento, ataque e skills são bloqueados.
 2. No dono, `NetworkHealth.OnEstadoMorteLocalMudou` faz o `GerenciadorUI` abrir o `PainelMorte`.
-3. O botão **Respawn** chama `SolicitarRespawnServerRpc`.
-4. O servidor restaura a vida, zera `estaMorto` e pega a posição no `RespawnManager`. A ordem de busca é: o campo do Inspector, depois o objeto `PontoRespawn` na cena, e por último `(0,1,0)`.
-5. O servidor teleporta o player e envia um `ClientRpc` para o dono se teleportar, já que o movimento é autoritativo do dono.
+3. O botão **Respawn** chama `SolicitarRespawnServerRpc`. Só o dono do personagem pode chamar (`InvokePermission.Owner`), e o servidor ignora o pedido se o player não estiver morto.
+4. O servidor restaura a vida, zera `estaMorto` e pega a posição no `RespawnManager`. A ordem de busca é: o campo do Inspector, depois o objeto `PontoRespawn` na cena (buscado uma vez e guardado), e por último `(0,1,0)`.
+5. O servidor teleporta o player e envia `TeleportarClienteRpc` (`SendTo.Owner`) para o dono se teleportar, já que o movimento é autoritativo do dono.
 
 ### 10. HUD
 
@@ -326,18 +331,18 @@ Skill existente, **"Marca do caçador"** (`Data/Skills/Skill 1.asset`): projéti
 | `Conexão/PersistirRede` | MonoBehaviour | `DontDestroyOnLoad` no NetworkManager do menu |
 | `Conexão/GerenciadorSpawn` | MonoBehaviour, singleton | Spawna um Player por cliente conectado |
 | `Conexão/NetworkHealth` | NetworkBehaviour | Vida e morte de players e mobs, XP e loot do mob, RPC de respawn |
-| `Conexão/RespawnManager` | NetworkBehaviour, singleton | Resolve a posição de respawn |
+| `Conexão/RespawnManager` | MonoBehaviour, singleton | Resolve a posição de respawn |
 | `Conexão/GerenciadorUI` | MonoBehaviour | Painel de morte e botão de respawn |
 | `Conexão/ProjetilCombate` | MonoBehaviour | Movimento do projétil; aplica dano só na cópia do servidor |
 | `Conexão/DadosSessao` | static | Dados entre cenas (host/cliente, IP, porta, classe). Usado só pelo `ConexaoUI` legado |
-| `Conexão/ConexaoUI` | MonoBehaviour | **Legado:** conexão direta por IP com UI em `OnGUI` |
+| `Conexão/ConexaoUI` | MonoBehaviour | **Legado:** conexão direta por IP com UI em `OnGUI`. Não reinicia a rede se ela já estiver ligada |
 | `Player/PlayerMovimento` | NetworkBehaviour | WASD + gravidade com `CharacterController`; `Teleportar()` seguro para a rede |
 | `Player/PlayerAtaque` | NetworkBehaviour | Ataque básico melee ou ranged mirado pelo mouse |
 | `Player/PlayerStats` | NetworkBehaviour | Nível, XP, atributos, mana e regen |
 | `Player/PlayerInventory` | NetworkBehaviour | Ouro (NetworkVariable) e lista de itens |
 | `Player/ItemCoativel` | NetworkBehaviour | Item no chão: queda até o chão e coleta |
 | `Player/GerenciadorHUD` | MonoBehaviour | HUD de texto e painel de inventário |
-| `Player/CameraSegue` | MonoBehaviour | Câmera isométrica seguindo o player |
+| `Player/CameraSegue` | MonoBehaviour | Câmera seguindo suavemente o player local |
 | `Combat/PlayerSkills` | NetworkBehaviour | 5 slots de skill: cooldown, mana, execução e Prey & Wounds |
 | `Combat/SkillData` | ScriptableObject | Definição de skill |
 | `Combat/StatusPreyWounds` | NetworkBehaviour | Estado de Prey e Wounds no alvo |
@@ -367,22 +372,22 @@ Convenção: código e nomes em **português**. Logs usam prefixo entre colchete
 Itens encontrados na análise do código. Vale conferir antes de evoluir o projeto.
 
 **Configuração e build**
-- **Build Settings** referenciam `Assets/_Project/Scenes/SampleScene.unity`, que não existe, e a `Cena_Menu` está em último. Coloque a `Cena_Menu` como índice 0 e remova a entrada quebrada; caso contrário, o build abre direto na `Cena_Teste`, onde nada inicia a rede.
-- `productName` ainda é `My project` e `companyName` é `DefaultCompany`.
+- O Build Settings ainda lista `SampleScene.unity`, que não existe. A entrada está desativada e não afeta o build, mas pode ser removida. A `Cena_Menu` é a primeira cena ativa.
+- Existe um Build Profile em `Assets/Settings/Build Profiles/Breakthrough.asset` (produto `Breakthrough`, empresa `KayArt`).
 - A pasta `UserSettings/` está versionada. Normalmente ela fica fora do git, por ser específica de cada máquina.
 - As pastas `Prefab/Mobs`, `Prefab/Player` e `Scripts/Ui` têm só o `.meta` e estão vazias.
 
 **Menu e seleção de personagem**
 - Dois botões da `Cena_Menu` chamam `MenuPrincipalUI.SelecionarPersonagem` e `MenuPrincipalUI.ClicarBotaoStart`, métodos que **não existem** no script. Os cliques não fazem nada.
 - A seleção de classe (`DadosSessao.IdPersonagemEscolhido`) não está implementada no fluxo do Relay.
-- Existem **dois NetworkManagers**: o do menu (persistente, com `PlayerPrefab` vazio) e o da `Cena_Teste` (com `PlayerPrefab = Player`). Vindo do menu, o da `Cena_Teste` é um duplicado. O spawn real é feito pelo `GerenciadorSpawn`.
+- Existem **dois NetworkManagers**: o do menu (persistente, com `PlayerPrefab` vazio) e o da `Cena_Teste` (com `PlayerPrefab = Player`). Vindo do menu, o da `Cena_Teste` é um duplicado; ele não tem `PersistirRede`, então não é destruído por esse script. O spawn real é feito pelo `GerenciadorSpawn`.
 - `ConexaoUI`, `DadosSessao` e `_Recovery/0.unity` são do fluxo antigo por IP. Candidatos a remoção.
+- `CameraSegue` acessa `NetworkManager.Singleton.SpawnManager` sem checar `null`. Numa cena sem NetworkManager, isso gera `NullReferenceException` a cada frame.
 
 **Segurança e cheats (RPCs com `InvokePermission.Everyone`)**
 - `PlayerInventory.AdicionarOuroServerRpc(int)`: qualquer cliente pode pedir qualquer quantidade de ouro.
-- `NetworkHealth.SolicitarRespawnServerRpc`: não verifica se o player está morto e pode ser invocado no objeto de outro jogador.
 - `ItemCoativel.SolicitarDespawnItemServerRpc`: não valida a distância do coletor.
-- Para um co-op entre amigos isso é aceitável. Para jogo público, troque para `InvokePermission.Owner` e valide no servidor.
+- Para um co-op entre amigos isso é aceitável. Para jogo público, troque para `InvokePermission.Owner` e valide no servidor, como já é feito em `NetworkHealth.SolicitarRespawnServerRpc`.
 
 **Gameplay e consistência**
 - O ataque básico **melee** chama `TomarDano` direto e ignora Prey & Wounds. O básico **ranged** passa por `AplicarDanoEEfeitosNoAlvo` (aplica os modificadores, mas não adiciona stacks).
@@ -390,7 +395,7 @@ Itens encontrados na análise do código. Vale conferir antes de evoluir o proje
 - A espada nunca dropa (`prefabEspada` vazio no Mob). `AdicionarItemServerRpc` nunca é chamado. A lista de itens não é `NetworkVariable`, então quem entra depois não a recebe.
 - O XP do mob vai para todos os players da sala, mesmo os mortos ou distantes.
 - No Dash, o servidor também move o player quando não é o dono. Como o `NetworkTransform` do Player é autoritativo do dono, esse movimento do servidor é sobrescrito.
-- O spawn usa `PlayerSpawnPoint`, mas `PlayerMovimento.OnNetworkSpawn` teleporta para `(clientId × 2, 1, 0)` em seguida.
+- O `GerenciadorSpawn` posiciona o player no `PlayerSpawnPoint` com deslocamento, mas `PlayerMovimento.OnNetworkSpawn` teleporta para `(clientId × 2, 1, 0)` logo em seguida, anulando esse posicionamento.
 - O HUD atualiza os textos todo frame em vez de usar os eventos `OnStatsAtualizados` e `OnInventarioAtualizado`, que já existem.
 - Os mobs andam sem NavMesh e atravessam obstáculos.
 
@@ -402,3 +407,4 @@ Itens encontrados na análise do código. Vale conferir antes de evoluir o proje
 |---|---|
 | 2026-11-11 | Conexão, movimento WASD sincronizado, combate e loot, morte e respawn, otimização (buffers NonAlloc) |
 | 2026-11-12 | Autenticação (UGS + Relay), HUD, "Fundação completa" |
+| 2026-11-13 | Robustez da rede (login com nova tentativa, trava de duplo clique, respawn restrito ao dono), câmera seguindo o player local, Build Profile `Breakthrough` |
