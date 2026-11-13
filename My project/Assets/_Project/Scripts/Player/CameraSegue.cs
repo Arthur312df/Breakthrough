@@ -1,70 +1,40 @@
+using Unity.Netcode;
 using UnityEngine;
 
-[RequireComponent(typeof(Camera))]
 public class CameraSegue : MonoBehaviour
 {
-    [Header("Configuração Top-Down Isométrica")]
-    [SerializeField] private float anguloInclinacao = 56f;
-    [SerializeField] private float campoDeVisaoFOV = 40f;
-    [SerializeField] private float distanciaDoAlvo = 19f;
+    [Header("Configurações")]
+    [SerializeField] private Vector3 offset = new Vector3(0f, 12f, -8f);
+    [SerializeField] private float velocidadeInterpolacao = 5f;
 
-    private Transform alvo;
-    private Camera cam;
-    private Vector3 offsetCalculado;
-
-    private void Awake()
-    {
-        cam = GetComponent<Camera>();
-        AplicarConfiguracaoIsometrica();
-    }
-
-    private void Start()
-    {
-        LocalizarPlayer();
-    }
-
-    private void LocalizarPlayer()
-    {
-        if (alvo != null) return;
-
-        // Procura diretamente pelo objeto que possui a Tag "Player" na cena
-        GameObject playerObj = GameObject.FindWithTag("Player");
-        if (playerObj != null)
-        {
-            alvo = playerObj.transform;
-            Debug.Log($"[Camera] Alvo encontrado com sucesso pela Tag: {alvo.name}");
-        }
-    }
-
-    private void AplicarConfiguracaoIsometrica()
-    {
-        if (cam != null)
-        {
-            cam.fieldOfView = campoDeVisaoFOV;
-        }
-
-        transform.rotation = Quaternion.Euler(anguloInclinacao, 0f, 0f);
-        offsetCalculado = -transform.forward * distanciaDoAlvo;
-    }
+    private Transform alvoPlayer;
 
     private void LateUpdate()
     {
-        // Se ainda não encontrou, continua tentando a cada frame até o player nascer na cena
-        if (alvo == null)
+        // Se ainda não achou o player local, continua procurando
+        if (alvoPlayer == null)
         {
-            LocalizarPlayer();
+            LocalizarPlayerLocal();
             return;
         }
 
-        // Segue o player perfeitamente
-        transform.position = alvo.position + offsetCalculado;
+        // Segue o player local suavemente
+        Vector3 posicaoDesejada = alvoPlayer.position + offset;
+        transform.position = Vector3.Lerp(transform.position, posicaoDesejada, velocidadeInterpolacao * Time.deltaTime);
     }
 
-#if UNITY_EDITOR
-    private void OnValidate()
+    private void LocalizarPlayerLocal()
     {
-        if (cam == null) cam = GetComponent<Camera>();
-        AplicarConfiguracaoIsometrica();
+        // Varre todos os NetworkObjects ativos na cena para achar o SEU player
+        foreach (var networkObj in NetworkManager.Singleton.SpawnManager.SpawnedObjectsList)
+        {
+            // O segredo está aqui: IsOwner garante que é o player daSTA tela específica (seja na Build ou no Editor)
+            if (networkObj.IsOwner && networkObj.CompareTag("Player"))
+            {
+                alvoPlayer = networkObj.transform;
+                Debug.Log($"[Camera] Alvo local encontrado com sucesso para o Client ID: {networkObj.OwnerClientId}");
+                break;
+            }
+        }
     }
-#endif
 }

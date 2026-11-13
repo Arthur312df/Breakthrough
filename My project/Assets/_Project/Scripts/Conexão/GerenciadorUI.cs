@@ -20,6 +20,15 @@ public class GerenciadorUI : MonoBehaviour
         NetworkHealth.OnPlayerLocalSpawnou += RegistrarPlayerLocal;
     }
 
+    private void Start()
+    {
+        // Se o player já nasceu antes da UI existir, pega ele agora
+        if (NetworkHealth.PlayerLocal != null)
+        {
+            RegistrarPlayerLocal(NetworkHealth.PlayerLocal);
+        }
+    }
+
     private void OnDestroy()
     {
         NetworkHealth.OnPlayerLocalSpawnou -= RegistrarPlayerLocal;
@@ -32,13 +41,23 @@ public class GerenciadorUI : MonoBehaviour
 
     private void RegistrarPlayerLocal(NetworkHealth health)
     {
+        // Evita assinar duas vezes o mesmo evento
+        if (playerLocalHealth != null)
+        {
+            playerLocalHealth.OnEstadoMorteLocalMudou -= AtualizarTelaMorte;
+        }
+
         playerLocalHealth = health;
         playerLocalHealth.OnEstadoMorteLocalMudou += AtualizarTelaMorte;
+        AtualizarTelaMorte(playerLocalHealth.estaMorto.Value);
 
         if (botaoRespawn != null)
         {
             botaoRespawn.onClick.RemoveAllListeners();
-            botaoRespawn.onClick.AddListener(() => playerLocalHealth.SolicitarRespawnServerRpc());
+            botaoRespawn.onClick.AddListener(() =>
+            {
+                if (playerLocalHealth != null) playerLocalHealth.SolicitarRespawnServerRpc();
+            });
         }
     }
 

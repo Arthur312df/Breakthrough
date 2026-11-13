@@ -5,8 +5,11 @@ public class GerenciadorSpawn : MonoBehaviour
 {
     [SerializeField] private GameObject prefabPlayer;
     [SerializeField] private Transform pontoRespawn;
+    [SerializeField] private float espacoEntrePlayers = 1.5f;
 
     public static GerenciadorSpawn Instance { get; private set; }
+
+    private bool inscrito;
 
     private void Awake()
     {
@@ -20,48 +23,52 @@ public class GerenciadorSpawn : MonoBehaviour
 
     private void Start()
     {
-        // Se já estiver rodando como servidor/host (ex: entrou na cena pelo menu), gerencia o spawn imediatamente
-        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer)
+        NetworkManager rede = NetworkManager.Singleton;
+        if (rede == null || !rede.IsServer) return;
+
+        rede.OnClientConnectedCallback += SpawnarPlayerRede;
+        inscrito = true;
+
+        // Quem já estava conectado antes da cena carregar (ex: o próprio Host)
+        foreach (ulong clientId in rede.ConnectedClientsIds)
         {
-            NetworkManager.Singleton.OnClientConnectedCallback += SpawnarPlayerRede;
-            
-            // Caso o host já tenha se conectado antes da cena carregar
-            foreach (var clientId in NetworkManager.Singleton.ConnectedClientsIds)
-            {
-                SpawnarPlayerRede(clientId);
-            }
+            SpawnarPlayerRede(clientId);
         }
     }
 
     private void OnDestroy()
     {
-        if (NetworkManager.Singleton != null)
+        if (inscrito && NetworkManager.Singleton != null)
         {
             NetworkManager.Singleton.OnClientConnectedCallback -= SpawnarPlayerRede;
         }
+
+        if (Instance == this) Instance = null;
     }
 
     public void SpawnarPlayerRede(ulong clientId)
     {
-        // Verifica se já não existe um player associado a este cliente para evitar duplicidade
-        foreach (var playerObj in NetworkManager.Singleton.SpawnManager.SpawnedObjectsList)
+        NetworkManager rede = NetworkManager.Singleton;
+
+        if (prefabPlayer == null)
         {
-            if (playerObj.IsPlayerObject && playerontalOwner(playerObj, clientId))
-            {
-                return;
-            }
+            Debug.LogError("[Spawner] O prefab do Player não foi atribuído no Inspector!");
+            return;
         }
 
-        Vector3 posicao = pontoRespawn != null ? pontoRespawn.position : Vector3.zero;
-        GameObject instanciaPlayer = Instantiate(prefabPlayer, posicao, Quaternion.identity);
-        
-        // Faz o spawn oficial na rede atrelando ao ID do cliente
-        instanciaPlayer.GetComponent<NetworkObject>().SpawnAsPlayerObject(clientId);
-        Debug.Log($"[Spawner] Player instanciado com sucesso para o Client ID: {clientId}");
-    }
+        // Se este cliente já tem um player, não cria outro
+        if (rede.ConnectedClients.TryGetValue(clientId, out NetworkClient cliente) && cliente.PlayerObject != null)
+        {
+            return;
+        }
 
-    private bool playerontalOwner(NetworkObject netObj, ulong clientId)
-    {
-        return netObj.OwnerClientId == clientId;
+        // Cada jogador nasce um pouco ao lado do outro para não ficarem empilhados
+        Vector3 posicaoBase = pontoRespawn != null ? pontoRespawn.position : Vector3.zero;
+        Vector3 deslocamento = new Vector3((int)(clientId % 4) * espacoEntrePlayers, 0f, 0f);
+
+        GameObject instanciaPlayer = Instantiate(prefabPlayer, posicaoBase + deslocamento, Quaternion.identity);
+        instanciaPlayer.GetComponent<NetworkObject>().SpawnAsPlayerObject(clientId);
+
+        Debug.Log($"[Spawner] Player instanciado para o Client ID: {clientId}");
     }
 }

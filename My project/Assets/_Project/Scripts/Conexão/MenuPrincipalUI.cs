@@ -7,16 +7,16 @@ using UnityEngine.UI;
 public class MenuPrincipalUI : MonoBehaviour
 {
     [Header("Painéis da UI")]
-    [SerializeField] private GameObject painelRedeRelay;         
-    [SerializeField] private GameObject painelSelecaoPersonagem; 
+    [SerializeField] private GameObject painelRedeRelay;
+    [SerializeField] private GameObject painelSelecaoPersonagem;
 
     [Header("Elementos de Texto")]
-    [SerializeField] private TMP_InputField inputCodigoSala; 
-    [SerializeField] private TMP_Text textoStatusRede;     
-    [SerializeField] private TMP_Text textoCodigoGerado;   
+    [SerializeField] private TMP_InputField inputCodigoSala;
+    [SerializeField] private TMP_Text textoStatusRede;
+    [SerializeField] private TMP_Text textoCodigoGerado;
 
     [Header("Configuração de Cenas")]
-    [SerializeField] private string nomeCenaDoJogo = "Cena_Teste"; 
+    [SerializeField] private string nomeCenaDoJogo = "Cena_Teste";
 
     private void Start()
     {
@@ -25,23 +25,34 @@ public class MenuPrincipalUI : MonoBehaviour
         if (painelSelecaoPersonagem != null) painelSelecaoPersonagem.SetActive(false);
     }
 
+    private void DefinirStatus(string mensagem)
+    {
+        if (textoStatusRede != null) textoStatusRede.text = mensagem;
+    }
+
     public async void AoClicarCriarSala()
     {
-        if (textoStatusRede != null) textoStatusRede.text = "Criando sala na nuvem...";
-        
+        if (ServicoRedeRelay.Instance == null)
+        {
+            DefinirStatus("Serviço de rede não encontrado na cena!");
+            return;
+        }
+
+        DefinirStatus("Criando sala na nuvem...");
+
         string codigoSala = await ServicoRedeRelay.Instance.CriarSalaRelay();
 
         if (!string.IsNullOrEmpty(codigoSala))
         {
-            if (textoStatusRede != null) textoStatusRede.text = "Sala criada com sucesso!";
+            DefinirStatus("Sala criada com sucesso!");
             if (textoCodigoGerado != null) textoCodigoGerado.text = $"Código: {codigoSala}";
-            
+
             // Aguarda 1.5s para o player ver o código e avança para a escolha do herói
             Invoke(nameof(AvancarParaSelecaoPersonagem), 1.5f);
         }
         else
         {
-            if (textoStatusRede != null) textoStatusRede.text = "Falha ao criar sala!";
+            DefinirStatus("Falha ao criar sala!");
         }
     }
 
@@ -51,22 +62,28 @@ public class MenuPrincipalUI : MonoBehaviour
 
         if (string.IsNullOrEmpty(codigoDigitado))
         {
-            if (textoStatusRede != null) textoStatusRede.text = "Digite o código da sala!";
+            DefinirStatus("Digite o código da sala!");
             return;
         }
 
-        if (textoStatusRede != null) textoStatusRede.text = $"Conectando à sala {codigoDigitado}...";
+        if (ServicoRedeRelay.Instance == null)
+        {
+            DefinirStatus("Serviço de rede não encontrado na cena!");
+            return;
+        }
+
+        DefinirStatus($"Conectando à sala {codigoDigitado}...");
 
         bool sucesso = await ServicoRedeRelay.Instance.EntrarSalaRelay(codigoDigitado);
 
         if (sucesso)
         {
-            if (textoStatusRede != null) textoStatusRede.text = "Conectado!";
+            DefinirStatus("Conectado!");
             AvancarParaSelecaoPersonagem();
         }
         else
         {
-            if (textoStatusRede != null) textoStatusRede.text = "Código inválido ou sala cheia!";
+            DefinirStatus("Código inválido ou sala cheia!");
         }
     }
 
@@ -79,14 +96,22 @@ public class MenuPrincipalUI : MonoBehaviour
 
     public void AoClicarIniciarJogoNaCenaTeste()
     {
-        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer)
+        NetworkManager rede = NetworkManager.Singleton;
+
+        if (rede == null || !rede.IsListening)
         {
-            Debug.Log($"[Rede] Host carregando a cena {nomeCenaDoJogo} para todos...");
-            NetworkManager.Singleton.SceneManager.LoadScene(nomeCenaDoJogo, LoadSceneMode.Single);
+            DefinirStatus("Crie ou entre em uma sala antes de iniciar.");
+            return;
         }
-        else
+
+        // Clientes NUNCA carregam a cena sozinhos: quem manda é o Host.
+        if (!rede.IsServer)
         {
-            SceneManager.LoadScene(nomeCenaDoJogo);
+            DefinirStatus("Aguardando o Host iniciar o jogo...");
+            return;
         }
+
+        Debug.Log($"[Rede] Host carregando a cena {nomeCenaDoJogo} para todos...");
+        rede.SceneManager.LoadScene(nomeCenaDoJogo, LoadSceneMode.Single);
     }
 }

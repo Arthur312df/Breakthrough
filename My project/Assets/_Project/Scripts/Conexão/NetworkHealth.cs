@@ -5,33 +5,37 @@ using UnityEngine;
 public class NetworkHealth : NetworkBehaviour
 {
     [SerializeField] private int vidaMaximaInicial = 100;
-    
+
     [Header("Configuração de Entidade")]
     [SerializeField] private bool ehMob = false;
     public bool EhMob => ehMob;
     [SerializeField] private int xpRecompensa = 40;
 
     public NetworkVariable<int> vidaMaxima = new NetworkVariable<int>(
-        100, 
-        NetworkVariableReadPermission.Everyone, 
+        100,
+        NetworkVariableReadPermission.Everyone,
         NetworkVariableWritePermission.Server
     );
 
     public NetworkVariable<int> vidaAtual = new NetworkVariable<int>(
-        100, 
-        NetworkVariableReadPermission.Everyone, 
+        100,
+        NetworkVariableReadPermission.Everyone,
         NetworkVariableWritePermission.Server
     );
 
     public NetworkVariable<bool> estaMorto = new NetworkVariable<bool>(
-        false, 
-        NetworkVariableReadPermission.Everyone, 
+        false,
+        NetworkVariableReadPermission.Everyone,
         NetworkVariableWritePermission.Server
     );
 
     public Action<NetworkHealth> OnMobMorreu;
     public static event Action<NetworkHealth> OnPlayerLocalSpawnou;
     public event Action<bool> OnEstadoMorteLocalMudou;
+
+    // Player controlado por ESTE computador. A UI usa isso para não perder o evento
+    // caso o player nasça antes dela.
+    public static NetworkHealth PlayerLocal { get; private set; }
 
     private PlayerMovimento playerMovimento;
     private MobLoot mobLoot;
@@ -53,6 +57,7 @@ public class NetworkHealth : NetworkBehaviour
 
         if (IsOwner && !ehMob)
         {
+            PlayerLocal = this;
             estaMorto.OnValueChanged += AoMudarEstadoMorte;
             OnPlayerLocalSpawnou?.Invoke(this);
         }
@@ -63,6 +68,7 @@ public class NetworkHealth : NetworkBehaviour
         if (IsOwner && !ehMob)
         {
             estaMorto.OnValueChanged -= AoMudarEstadoMorte;
+            if (PlayerLocal == this) PlayerLocal = null;
         }
     }
 
@@ -84,7 +90,8 @@ public class NetworkHealth : NetworkBehaviour
 
     public void TomarDano(int quantidade)
     {
-        if (!IsServer || estaMorto.Value) return;
+        // Valor negativo curaria o alvo, então é ignorado
+        if (!IsServer || estaMorto.Value || quantidade <= 0) return;
 
         vidaAtual.Value = Mathf.Clamp(vidaAtual.Value - quantidade, 0, vidaMaxima.Value);
 
@@ -116,6 +123,7 @@ public class NetworkHealth : NetworkBehaviour
 
     private void EntregarXpParaPlayers()
     {
+        // Hoje o XP vai para todos os players conectados
         foreach (var client in NetworkManager.Singleton.ConnectedClientsList)
         {
             if (client.PlayerObject != null && client.PlayerObject.TryGetComponent<PlayerStats>(out var stats))
@@ -125,28 +133,28 @@ public class NetworkHealth : NetworkBehaviour
         }
     }
 
-    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+    // Só o DONO deste personagem pode pedir respawn, e só se estiver morto.
+    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
     public void SolicitarRespawnServerRpc()
     {
-        if (!IsServer) return;
+        if (ehMob || !estaMorto.Value) return;
 
-        Vector3 posicaoRespawn = RespawnManager.Instance != null 
-            ? RespawnManager.Instance.ObterPosicaoRespawn() 
+        Vector3 posicaoRespawn = RespawnManager.Instance != null
+            ? RespawnManager.Instance.ObterPosicaoRespawn()
             : new Vector3(0f, 1f, 0f);
 
         vidaAtual.Value = vidaMaxima.Value;
         estaMorto.Value = false;
 
         if (playerMovimento != null) playerMovimento.Teleportar(posicaoRespawn);
-        TeleportarClienteClientRpc(posicaoRespawn);
+        TeleportarClienteRpc(posicaoRespawn);
     }
 
-    [ClientRpc]
-    private void TeleportarClienteClientRpc(Vector3 novaPosicao)
+    // Vai só para o dono. Se o dono for o próprio servidor, ele já teleportou acima.
+    [Rpc(SendTo.Owner)]
+    private void TeleportarClienteRpc(Vector3 novaPosicao)
     {
-        if (IsOwner && !IsServer && playerMovimento != null)
-        {
-            playerMovimento.Teleportar(novaPosicao);
-        }
+        if (IsServer) return;
+        if (playerMovimento != null) playerMovimento.Teleportar(novaPosicao);
     }
 }

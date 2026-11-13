@@ -5,32 +5,37 @@ using UnityEngine.SceneManagement;
 
 public class ConexaoUI : MonoBehaviour
 {
+    [SerializeField] private string nomeCenaMenu = "Cena_Menu";
+
     private void Start()
     {
-        Debug.Log("[Rede] ConexaoUI iniciou.");
+        NetworkManager rede = NetworkManager.Singleton;
+        if (rede == null)
+        {
+            Debug.LogWarning("[Rede] Nenhum NetworkManager encontrado. Abra o jogo pela Cena_Menu.");
+            return;
+        }
 
-        if (NetworkManager.Singleton == null) return;
+        rede.OnClientConnectedCallback += AoConectar;
+        rede.OnClientDisconnectCallback += AoDesconectar;
 
-        NetworkManager.Singleton.OnClientConnectedCallback += AoConectar;
-        NetworkManager.Singleton.OnClientDisconnectCallback += AoDesconectar;
+        // Se a rede já está ligada (veio do menu com Relay), NÃO mexe no transporte
+        // nem inicia de novo.
+        if (rede.IsListening) return;
 
-        // Configura o IP e Porta escolhidos lá no menu (se houver UnityTransport)
-        if (NetworkManager.Singleton.TryGetComponent<UnityTransport>(out var transport))
+        // Rede ainda desligada (ex: teste direto por IP/localhost)
+        if (rede.TryGetComponent(out UnityTransport transport))
         {
             transport.SetConnectionData(DadosSessao.EnderecoIP, DadosSessao.Porta);
         }
 
-        // Inicia automaticamente de acordo com o que foi escolhido no Menu!
-        if (!NetworkManager.Singleton.IsClient && !NetworkManager.Singleton.IsServer)
+        if (DadosSessao.IniciarComoHost)
         {
-            if (DadosSessao.IniciarComoHost)
-            {
-                NetworkManager.Singleton.StartHost();
-            }
-            else
-            {
-                NetworkManager.Singleton.StartClient();
-            }
+            rede.StartHost();
+        }
+        else
+        {
+            rede.StartClient();
         }
     }
 
@@ -55,20 +60,18 @@ public class ConexaoUI : MonoBehaviour
 
     private void OnGUI()
     {
-        if (NetworkManager.Singleton == null) return;
+        NetworkManager rede = NetworkManager.Singleton;
+        if (rede == null || !rede.IsListening) return;
 
-        GUILayout.BeginArea(new Rect(10, 10, 220, 100));
+        GUILayout.BeginArea(new Rect(10, 10, 240, 100));
 
-        if (NetworkManager.Singleton.IsHost || NetworkManager.Singleton.IsClient)
+        string modo = rede.IsHost ? "Host" : "Client";
+        GUILayout.Label($"Modo: {modo} | Classe ID: {DadosSessao.IdPersonagemEscolhido}");
+
+        if (GUILayout.Button("Desconectar / Menu"))
         {
-            string modo = NetworkManager.Singleton.IsHost ? "Host" : "Client";
-            GUILayout.Label($"Modo: {modo} | Classe ID: {DadosSessao.IdPersonagemEscolhido}");
-
-            if (GUILayout.Button("Desconectar / Menu"))
-            {
-                NetworkManager.Singleton.Shutdown();
-                SceneManager.LoadScene("Cena_Menu");
-            }
+            rede.Shutdown();
+            SceneManager.LoadScene(nomeCenaMenu);
         }
 
         GUILayout.EndArea();

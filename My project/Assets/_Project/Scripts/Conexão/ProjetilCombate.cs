@@ -10,6 +10,7 @@ public class ProjetilCombate : MonoBehaviour
     private bool ehServidor;
     private ulong idAtirador;
     private SkillData skillOrigem;
+    private bool jaAcertou; // evita dano duplo se encostar em dois alvos no mesmo frame
 
     [SerializeField] private float tempoDeVida = 4f;
 
@@ -39,39 +40,55 @@ public class ProjetilCombate : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
+        if (jaAcertou) return;
+
         // Ignora colisão com quem atirou
         if (disparadoPorPlayer && other.CompareTag("Player")) return;
-        if (!disparadoPorPlayer && other.GetComponent<MobCombat>() != null) return;
+        if (!disparadoPorPlayer && other.GetComponentInParent<MobCombat>() != null) return;
 
         // Ignora moedas/itens no chão
-        if (other.GetComponent<ItemCoativel>() != null) return;
+        if (other.GetComponentInParent<ItemCoativel>() != null) return;
 
-        // Apenas o servidor valida e aplica o dano real na rede
-        if (ehServidor)
+        NetworkHealth alvoHealth = other.GetComponentInParent<NetworkHealth>();
+
+        // Não é um alvo com vida: só para em paredes/cenário, não em zonas de gatilho
+        if (alvoHealth == null)
         {
-            if (other.TryGetComponent<NetworkHealth>(out var alvoHealth))
-            {
-                if (alvoHealth.estaMorto.Value) return;
+            if (other.isTrigger) return;
 
-                // Se o player atirou num Mob, ou se um Mob atirou num Player
-                bool alvoEhMob = alvoHealth.EhMob;
-                if (disparadoPorPlayer == alvoEhMob)
-                {
-                    if (disparadoPorPlayer)
-                    {
-                        PlayerSkills.AplicarDanoEEfeitosNoAlvo(alvoHealth, skillOrigem, dano);
-                    }
-                    else
-                    {
-                        alvoHealth.TomarDano(dano);
-                    }
-
-                    Debug.Log($"[Combate Ranged] Projétil atingiu {other.name} causando {dano} de dano base!");
-                }
-            }
+            jaAcertou = true;
+            Destroy(gameObject);
+            return;
         }
 
-        // Destrói o projétil visualmente ao bater no alvo ou cenário
+        // Atravessa cadáveres
+        if (alvoHealth.estaMorto.Value) return;
+
+        jaAcertou = true;
+
+        // Apenas o servidor valida e aplica o dano real na rede.
+        // Player atira em Mob, ou Mob atira em Player.
+        if (ehServidor && disparadoPorPlayer == alvoHealth.EhMob)
+        {
+            if (disparadoPorPlayer)
+            {
+                PlayerSkills.AplicarDanoEEfeitosNoAlvo(alvoHealth, skillOrigem, dano);
+            }
+            else
+            {
+                alvoHealth.TomarDano(dano);
+            }
+
+            Log($"[Combate Ranged] Projétil atingiu {other.name} causando {dano} de dano base!");
+        }
+
         Destroy(gameObject);
+    }
+
+    // Só existe no Editor: no jogo final o Debug.Log some e não pesa
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    private static void Log(string mensagem)
+    {
+        Debug.Log(mensagem);
     }
 }
