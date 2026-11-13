@@ -152,10 +152,9 @@ Detalhes:
 
 1. `GerenciadorSpawn.Start` (só no servidor) assina `OnClientConnectedCallback` e spawna players para todos os clientes já conectados.
 2. Antes de instanciar, verifica se o cliente já tem um `PlayerObject` em `ConnectedClients`, para evitar duplicata.
-3. Instancia `Player.prefab` no `PlayerSpawnPoint`, deslocado em X por `(clientId % 4) × 1.5`, e chama `SpawnAsPlayerObject(clientId)`.
-4. Em seguida, em `PlayerMovimento.OnNetworkSpawn`, o dono se teleporta para `(OwnerClientId * 2, 1, 0)`. Isso **sobrescreve** a posição calculada no passo 3 (ver "Pontos de atenção").
-5. `NetworkHealth` guarda o player local em `NetworkHealth.PlayerLocal` e dispara `OnPlayerLocalSpawnou`. O `GerenciadorUI` usa os dois, então funciona mesmo se o player nascer antes da UI.
-6. `CameraSegue` procura entre os NetworkObjects spawnados aquele com tag `Player` e `IsOwner`, ou seja, o player **desta** tela. Depois segue com offset `(0, 12, -8)` e interpolação suave (`Lerp`, velocidade 5). A rotação da câmera vem da cena, não do script.
+3. Instancia `Player.prefab` no `PlayerSpawnPoint`, deslocado em X por `(clientId % 4) × 1.5`, e chama `SpawnAsPlayerObject(clientId)`. Sem ponto configurado, usa `(0, 1, 0)` como base. O `GerenciadorSpawn` é o único que decide a posição inicial.
+4. `NetworkHealth` guarda o player local em `NetworkHealth.PlayerLocal` e dispara `OnPlayerLocalSpawnou`. O `GerenciadorUI` usa os dois, então funciona mesmo se o player nascer antes da UI.
+5. `CameraSegue` procura o player **desta** tela com `SpawnManager.GetLocalPlayerObject()`, a cada 0.25s até achar. Ao achar, posiciona a câmera direto nele. Depois segue com offset `(0, 12, -8)` e suavização exponencial, que não muda com o FPS. A rotação da câmera vem da cena, não do script.
 
 ### 3. Loop de combate
 
@@ -181,8 +180,8 @@ flowchart TD
 ```
 
 **Ataque básico** (`PlayerAtaque`):
-- Cooldown de 0.4s. Não atinge outros jogadores (sem friendly fire).
-- **Melee:** atinge **um único** alvo, o mob mais próximo dentro de um cone de 120° e raio 3. Escala com Força.
+- Cooldown de 0.4s no cliente. O servidor também controla o intervalo, com 10% de folga para lag, e descarta direções inválidas (inclusive NaN). Não atinge outros jogadores (sem friendly fire).
+- **Melee:** atinge **um único** alvo, o mob mais próximo dentro de um cone de 120° e raio 3. Escala com Força. A busca usa o `LayerMask` `camadaAlvos` (marque só a layer dos mobs) e `GetComponentInParent`, então funciona com colliders em objetos filhos.
 - **Ranged:** dispara um projétil. Escala com Agilidade. **O prefab do Player está configurado como Ranged.**
 
 **Skills** (`PlayerSkills`):
@@ -231,9 +230,12 @@ O `MobSpawner` mantém 3 mobs num raio de 8 em torno de si e só começa quando 
 
 ### 7. Coleta de ouro
 
-1. `ItemCoativel` (no `Gold.prefab`) desce suavemente até o chão ao spawnar.
-2. Quando o player **dono local** encosta no trigger, chama `PlayerInventory.AdicionarOuroServerRpc(10)` e `SolicitarDespawnItemServerRpc()`.
-3. O servidor soma o ouro na `NetworkVariable` e despawna o item.
+1. `ItemCoativel` (no `Gold.prefab`) desce suavemente até o chão mais próximo ao spawnar.
+2. Quando o player **dono local** encosta no trigger, o cliente só avisa o servidor com `SolicitarColetaServerRpc()`, no máximo uma vez a cada 0.5s.
+3. O servidor valida o pedido: o remetente precisa ter um player, estar vivo e estar a até 4 de distância do item (posição conhecida pelo servidor). O item só pode ser coletado uma vez.
+4. O servidor chama `PlayerInventory.AdicionarOuro(10)`. A quantidade vem do item, nunca do cliente. Depois despawna o item.
+
+O inventário (`PlayerInventory`) guarda o ouro numa `NetworkVariable<int>` e os itens numa `NetworkList<FixedString128Bytes>` que só o dono recebe. `AdicionarOuro` e `AdicionarItem` são métodos comuns que só funcionam no servidor; não são RPCs.
 
 ### 8. Progressão (nível, atributos, mana)
 
@@ -252,7 +254,7 @@ O `MobSpawner` mantém 3 mobs num raio de 8 em torno de si e só começa quando 
 
 ### 10. HUD
 
-`GerenciadorHUD` busca o player local via `SpawnManager.GetLocalPlayerObject()` e atualiza os textos **a cada frame** (não usa os eventos expostos):
+`GerenciadorHUD` busca o player local via `SpawnManager.GetLocalPlayerObject()` e só se vincula quando o player tem `NetworkHealth`, `PlayerStats` e `PlayerInventory`. Lê os valores todo frame, mas só reescreve um texto quando o valor muda. A lista de itens é redesenhada via evento `OnInventarioAtualizado`.
 - Sempre visível: Vida, Mana, Nível/XP.
 - Alterna com **I** ou **Tab**: atributos, ouro e itens. Começa aberto.
 
@@ -262,7 +264,7 @@ O `MobSpawner` mantém 3 mobs num raio de 8 em torno de si e só começa quando 
 
 | O quê | Fórmula | Onde |
 |---|---|---|
-| Dano do ataque básico | `danoBase(25) + (atributo − 10) × 3` (FOR se melee, AGI se ranged) | `PlayerAtaque.CalcularDanoFinal` |
+| Dano do ataque básico | `max(1, danoBase(25) + (atributo − 10) × 3)` (FOR se melee, AGI se ranged) | `PlayerAtaque.CalcularDanoFinal` |
 | Dano de skill | `danoBase + (atributo − 10) × bonusPorPontoAtributo` | `PlayerSkills.CalcularDanoSkill` |
 | Modificador Prey & Wounds | `(dano + wounds × 5) × 1.25 se Prey` | `StatusPreyWounds.CalcularDanoModificado` |
 | Ruptura | `stacks × 35 × 1.25 se Prey` | `StatusPreyWounds.ConsumirTodosWounds` |
@@ -329,7 +331,7 @@ Skill existente, **"Marca do caçador"** (`Data/Skills/Skill 1.asset`): projéti
 | `Conexão/ServicoRedeRelay` | MonoBehaviour, singleton, persistente | Inicializa UGS, faz login anônimo, cria e entra em salas do Relay, inicia Host/Client |
 | `Conexão/MenuPrincipalUI` | MonoBehaviour | Botões do menu: criar sala, entrar sala, iniciar jogo |
 | `Conexão/PersistirRede` | MonoBehaviour | `DontDestroyOnLoad` no NetworkManager do menu |
-| `Conexão/GerenciadorSpawn` | MonoBehaviour, singleton | Spawna um Player por cliente conectado |
+| `Player/GerenciadorSpawn` | MonoBehaviour, singleton | Spawna um Player por cliente conectado e decide a posição inicial. Há uma cópia antiga em `Conexão/` (ver "Pontos de atenção") |
 | `Conexão/NetworkHealth` | NetworkBehaviour | Vida e morte de players e mobs, XP e loot do mob, RPC de respawn |
 | `Conexão/RespawnManager` | MonoBehaviour, singleton | Resolve a posição de respawn |
 | `Conexão/GerenciadorUI` | MonoBehaviour | Painel de morte e botão de respawn |
@@ -339,8 +341,8 @@ Skill existente, **"Marca do caçador"** (`Data/Skills/Skill 1.asset`): projéti
 | `Player/PlayerMovimento` | NetworkBehaviour | WASD + gravidade com `CharacterController`; `Teleportar()` seguro para a rede |
 | `Player/PlayerAtaque` | NetworkBehaviour | Ataque básico melee ou ranged mirado pelo mouse |
 | `Player/PlayerStats` | NetworkBehaviour | Nível, XP, atributos, mana e regen |
-| `Player/PlayerInventory` | NetworkBehaviour | Ouro (NetworkVariable) e lista de itens |
-| `Player/ItemCoativel` | NetworkBehaviour | Item no chão: queda até o chão e coleta |
+| `Player/PlayerInventory` | NetworkBehaviour | Ouro (`NetworkVariable`) e itens (`NetworkList`, só o dono recebe). Escrita só no servidor |
+| `Player/ItemCoativel` | NetworkBehaviour | Item no chão: queda até o chão e coleta validada no servidor |
 | `Player/GerenciadorHUD` | MonoBehaviour | HUD de texto e painel de inventário |
 | `Player/CameraSegue` | MonoBehaviour | Câmera seguindo suavemente o player local |
 | `Combat/PlayerSkills` | NetworkBehaviour | 5 slots de skill: cooldown, mana, execução e Prey & Wounds |
@@ -371,6 +373,9 @@ Convenção: código e nomes em **português**. Logs usam prefixo entre colchete
 
 Itens encontrados na análise do código. Vale conferir antes de evoluir o projeto.
 
+**Erro de compilação (urgente)**
+- `GerenciadorSpawn` existe em **dois arquivos**: `Scripts/Conexão/GerenciadorSpawn.cs` e `Scripts/Player/GerenciadorSpawn.cs`. As duas classes têm o mesmo nome no mesmo assembly, o que gera o erro `CS0101` e impede o projeto de compilar. A versão em `Player/` é a mais nova (spawn em `(0,1,0)` sem ponto configurado). Apague a de `Conexão/` mantendo o `.meta` dela, e mova esse `.meta` para `Player/`. Assim a referência do componente na `Cena_Teste` continua funcionando. O arquivo de `Player/` foi commitado sem `.meta`.
+
 **Configuração e build**
 - O Build Settings ainda lista `SampleScene.unity`, que não existe. A entrada está desativada e não afeta o build, mas pode ser removida. A `Cena_Menu` é a primeira cena ativa.
 - Existe um Build Profile em `Assets/Settings/Build Profiles/Breakthrough.asset` (produto `Breakthrough`, empresa `KayArt`).
@@ -382,21 +387,17 @@ Itens encontrados na análise do código. Vale conferir antes de evoluir o proje
 - A seleção de classe (`DadosSessao.IdPersonagemEscolhido`) não está implementada no fluxo do Relay.
 - Existem **dois NetworkManagers**: o do menu (persistente, com `PlayerPrefab` vazio) e o da `Cena_Teste` (com `PlayerPrefab = Player`). Vindo do menu, o da `Cena_Teste` é um duplicado; ele não tem `PersistirRede`, então não é destruído por esse script. O spawn real é feito pelo `GerenciadorSpawn`.
 - `ConexaoUI`, `DadosSessao` e `_Recovery/0.unity` são do fluxo antigo por IP. Candidatos a remoção.
-- `CameraSegue` acessa `NetworkManager.Singleton.SpawnManager` sem checar `null`. Numa cena sem NetworkManager, isso gera `NullReferenceException` a cada frame.
 
-**Segurança e cheats (RPCs com `InvokePermission.Everyone`)**
-- `PlayerInventory.AdicionarOuroServerRpc(int)`: qualquer cliente pode pedir qualquer quantidade de ouro.
-- `ItemCoativel.SolicitarDespawnItemServerRpc`: não valida a distância do coletor.
-- Para um co-op entre amigos isso é aceitável. Para jogo público, troque para `InvokePermission.Owner` e valide no servidor, como já é feito em `NetworkHealth.SolicitarRespawnServerRpc`.
+**Segurança**
+- Os RPCs de ouro e respawn, antes abertos a qualquer cliente, já foram corrigidos. Ao criar RPCs novos, siga o mesmo padrão: o cliente só **pede**, o servidor valida (dono, vivo, distância, cooldown) e os valores vêm do servidor, nunca do cliente.
 
 **Gameplay e consistência**
 - O ataque básico **melee** chama `TomarDano` direto e ignora Prey & Wounds. O básico **ranged** passa por `AplicarDanoEEfeitosNoAlvo` (aplica os modificadores, mas não adiciona stacks).
 - A "Marca do caçador" aplica 1 Wound e logo depois consome todos. Os Wounds dela nunca acumulam: cada acerto gera uma Ruptura de 1 stack.
-- A espada nunca dropa (`prefabEspada` vazio no Mob). `AdicionarItemServerRpc` nunca é chamado. A lista de itens não é `NetworkVariable`, então quem entra depois não a recebe.
+- A espada nunca dropa (`prefabEspada` vazio no Mob), e nenhum código chama `PlayerInventory.AdicionarItem`. Hoje a lista de itens fica sempre vazia.
+- `PlayerStats.GastarMana` retorna `false` quando o custo é `<= 0`. Uma skill com `custoMana = 0` nunca será executada, porque `PlayerSkills` cancela a skill quando `GastarMana` falha.
 - O XP do mob vai para todos os players da sala, mesmo os mortos ou distantes.
 - No Dash, o servidor também move o player quando não é o dono. Como o `NetworkTransform` do Player é autoritativo do dono, esse movimento do servidor é sobrescrito.
-- O `GerenciadorSpawn` posiciona o player no `PlayerSpawnPoint` com deslocamento, mas `PlayerMovimento.OnNetworkSpawn` teleporta para `(clientId × 2, 1, 0)` logo em seguida, anulando esse posicionamento.
-- O HUD atualiza os textos todo frame em vez de usar os eventos `OnStatsAtualizados` e `OnInventarioAtualizado`, que já existem.
 - Os mobs andam sem NavMesh e atravessam obstáculos.
 
 ---
@@ -408,3 +409,4 @@ Itens encontrados na análise do código. Vale conferir antes de evoluir o proje
 | 2026-11-11 | Conexão, movimento WASD sincronizado, combate e loot, morte e respawn, otimização (buffers NonAlloc) |
 | 2026-11-12 | Autenticação (UGS + Relay), HUD, "Fundação completa" |
 | 2026-11-13 | Robustez da rede (login com nova tentativa, trava de duplo clique, respawn restrito ao dono), câmera seguindo o player local, Build Profile `Breakthrough` |
+| 2026-11-13 | Otimização e anti-cheat: coleta validada no servidor, inventário com `NetworkList`, cooldown do ataque no servidor, HUD sem reescrita desnecessária, spawn decidido só pelo `GerenciadorSpawn` |
