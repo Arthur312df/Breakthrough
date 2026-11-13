@@ -21,6 +21,8 @@ public class PlayerAtaque : NetworkBehaviour
     [SerializeField] private float alcanceMelee = 3f;
     [Tooltip("Ângulo do cone frontal de ataque (ex: 120 graus na frente do player)")]
     [SerializeField] private float anguloConeMelee = 120f;
+    [Tooltip("Marque SÓ a layer dos Mobs: assim chão, paredes e itens não ocupam espaço na busca")]
+    [SerializeField] private LayerMask camadaAlvos = ~0;
 
     [Header("Configurações Ranged")]
     [SerializeField] private GameObject prefabProjetil;
@@ -33,8 +35,9 @@ public class PlayerAtaque : NetworkBehaviour
     private Camera camPrincipal;
 
     // Buffer pré-alocado na memória (Zero Garbage Collection)
-    private readonly Collider[] bufferColisoes = new Collider[15];
+    private readonly Collider[] bufferColisoes = new Collider[32];
     private float proximoTempoAtaque;
+    private float proximoAtaqueServidor;
 
     private void Awake()
     {
@@ -53,7 +56,7 @@ public class PlayerAtaque : NetworkBehaviour
         {
             proximoTempoAtaque = Time.time + tempoEntreAtaques;
             Vector3 direcaoMira = ObterDirecaoDoMouse();
-            
+
             // Gira o player visualmente para onde atacou
             if (direcaoMira != Vector3.zero)
             {
@@ -100,8 +103,15 @@ public class PlayerAtaque : NetworkBehaviour
     {
         if (networkHealth != null && networkHealth.estaMorto.Value) return;
 
+        // O servidor também controla o intervalo entre ataques (um cliente modificado poderia
+        // ignorar o intervalo do lado dele). 10% de folga para compensar lag.
+        if (Time.time < proximoAtaqueServidor) return;
+        proximoAtaqueServidor = Time.time + tempoEntreAtaques * 0.9f;
+
         direcaoAtaque.y = 0f;
-        if (direcaoAtaque.sqrMagnitude < 0.01f) direcaoAtaque = transform.forward;
+
+        // Escrito assim de propósito: também pega valores inválidos (NaN) enviados por um cliente modificado
+        if (!(direcaoAtaque.sqrMagnitude >= 0.01f)) direcaoAtaque = transform.forward;
         direcaoAtaque.Normalize();
 
         int danoFinal = CalcularDanoFinal();
@@ -121,17 +131,17 @@ public class PlayerAtaque : NetworkBehaviour
         if (playerStats == null) return danoBase;
 
         // Melee escala mais com Força; Ranged escala com Agilidade
-        int atributoPrincipal = (estiloCombate == EstiloCombate.Melee) 
-            ? playerStats.forca.Value 
+        int atributoPrincipal = (estiloCombate == EstiloCombate.Melee)
+            ? playerStats.forca.Value
             : playerStats.agilidade.Value;
 
         int bonusAtributo = (atributoPrincipal - 10) * 3;
-        return danoBase + bonusAtributo;
+        return Mathf.Max(1, danoBase + bonusAtributo);
     }
 
     private void ExecutarAtaqueMelee(Vector3 direcaoAtaque, int danoFinal)
     {
-        int quantidadeAtingida = Physics.OverlapSphereNonAlloc(transform.position, alcanceMelee, bufferColisoes);
+        int quantidadeAtingida = Physics.OverlapSphereNonAlloc(transform.position, alcanceMelee, bufferColisoes, camadaAlvos);
         float cossenoLimiteCone = Mathf.Cos((anguloConeMelee * 0.5f) * Mathf.Deg2Rad);
 
         NetworkHealth melhorAlvo = null;
@@ -139,38 +149,36 @@ public class PlayerAtaque : NetworkBehaviour
 
         for (int i = 0; i < quantidadeAtingida; i++)
         {
-            Collider hit = bufferColisoes[i];
-            if (hit.gameObject == gameObject) continue;
+            // GetComponentInParent: funciona mesmo quando o collider está num objeto filho do mob
+            NetworkHealth alvoHealth = bufferColisoes[i].GetComponentInParent<NetworkHealth>();
+            if (alvoHealth == null) continue;
 
-            if (hit.TryGetComponent<NetworkHealth>(out NetworkHealth alvoHealth))
+            // Ignora alvos mortos ou outros jogadores (evita Friendly Fire)
+            if (alvoHealth.estaMorto.Value || !alvoHealth.EhMob) continue;
+
+            Vector3 proAlvo = alvoHealth.transform.position - transform.position;
+            proAlvo.y = 0f;
+            float distSqr = proAlvo.sqrMagnitude;
+
+            // Se estiver fora do cone frontal de ataque (e não estiver colado no corpo do player), ignora
+            if (distSqr > 0.5f)
             {
-                // Ignora alvos mortos ou outros jogadores (evita Friendly Fire)
-                if (alvoHealth.estaMorto.Value || !alvoHealth.EhMob) continue;
+                float dot = Vector3.Dot(direcaoAtaque, proAlvo.normalized);
+                if (dot < cossenoLimiteCone) continue;
+            }
 
-                Vector3 proAlvo = hit.transform.position - transform.position;
-                proAlvo.y = 0f;
-                float distSqr = proAlvo.sqrMagnitude;
-
-                // Se estiver fora do cone frontal de ataque (e não estiver colado no corpo do player), ignora
-                if (distSqr > 0.5f)
-                {
-                    float dot = Vector3.Dot(direcaoAtaque, proAlvo.normalized);
-                    if (dot < cossenoLimiteCone) continue;
-                }
-
-                // Prioriza o inimigo mais próximo dentro do arco do golpe
-                if (distSqr < menorDistanciaSqr)
-                {
-                    menorDistanciaSqr = distSqr;
-                    melhorAlvo = alvoHealth;
-                }
+            // Prioriza o inimigo mais próximo dentro do arco do golpe
+            if (distSqr < menorDistanciaSqr)
+            {
+                menorDistanciaSqr = distSqr;
+                melhorAlvo = alvoHealth;
             }
         }
 
         if (melhorAlvo != null)
         {
             melhorAlvo.TomarDano(danoFinal);
-            Debug.Log($"[Combate Melee] Player {OwnerClientId} causou {danoFinal} de dano em {melhorAlvo.name}!");
+            Log($"[Combate Melee] Player {OwnerClientId} causou {danoFinal} de dano em {melhorAlvo.name}!");
         }
     }
 
@@ -204,6 +212,13 @@ public class PlayerAtaque : NetworkBehaviour
         {
             projetil.Inicializar(direcaoAtaque, velocidadeProjetil, danoFinal, true, validarNoServidor, OwnerClientId);
         }
+    }
+
+    // Só existe no Editor: no jogo final o Debug.Log some e não pesa
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    private static void Log(string mensagem)
+    {
+        Debug.Log(mensagem);
     }
 
 #if UNITY_EDITOR

@@ -52,11 +52,11 @@ public class PlayerStats : NetworkBehaviour
 
         if (IsOwner)
         {
-            nivel.OnValueChanged += (_, _) => OnStatsAtualizados?.Invoke();
-            xpAtual.OnValueChanged += (_, _) => OnStatsAtualizados?.Invoke();
-            xpProximoNivel.OnValueChanged += (_, _) => OnStatsAtualizados?.Invoke();
-            manaAtual.OnValueChanged += (_, _) => OnStatsAtualizados?.Invoke();
-            manaMaxima.OnValueChanged += (_, _) => OnStatsAtualizados?.Invoke();
+            nivel.OnValueChanged += AoMudarValor;
+            xpAtual.OnValueChanged += AoMudarValor;
+            xpProximoNivel.OnValueChanged += AoMudarValor;
+            manaAtual.OnValueChanged += AoMudarValor;
+            manaMaxima.OnValueChanged += AoMudarValor;
 
             OnPlayerStatsLocalSpawnou?.Invoke(this);
         }
@@ -68,6 +68,18 @@ public class PlayerStats : NetworkBehaviour
         {
             networkHealth.estaMorto.OnValueChanged -= AoMudarEstadoMorteServidor;
         }
+
+        // Desfaz as assinaturas (antes eram lambdas que nunca saíam do evento)
+        nivel.OnValueChanged -= AoMudarValor;
+        xpAtual.OnValueChanged -= AoMudarValor;
+        xpProximoNivel.OnValueChanged -= AoMudarValor;
+        manaAtual.OnValueChanged -= AoMudarValor;
+        manaMaxima.OnValueChanged -= AoMudarValor;
+    }
+
+    private void AoMudarValor(int valorAntigo, int valorNovo)
+    {
+        OnStatsAtualizados?.Invoke();
     }
 
     private void AoMudarEstadoMorteServidor(bool estavaMorto, bool mortoAgora)
@@ -89,7 +101,7 @@ public class PlayerStats : NetworkBehaviour
             if (timerRegenMana >= intervaloRegenSegundos)
             {
                 timerRegenMana = 0f;
-                
+
                 int bonusInteligencia = Mathf.Max(0, (inteligencia.Value - 10) / 5);
                 int ganhoTotal = regenManaPorCiclo + bonusInteligencia;
 
@@ -104,7 +116,7 @@ public class PlayerStats : NetworkBehaviour
 
     public void GanharXP(int quantidade)
     {
-        if (!IsServer) return;
+        if (!IsServer || quantidade <= 0) return;
 
         xpAtual.Value += quantidade;
         Debug.Log($"[Stats] Player {OwnerClientId} ganhou {quantidade} XP ({xpAtual.Value}/{xpProximoNivel.Value})");
@@ -152,7 +164,7 @@ public class PlayerStats : NetworkBehaviour
 
     public bool GastarMana(int custo)
     {
-        if (!IsServer || manaAtual.Value < custo) return false;
+        if (!IsServer || custo <= 0 || manaAtual.Value < custo) return false;
         manaAtual.Value -= custo;
         return true;
     }

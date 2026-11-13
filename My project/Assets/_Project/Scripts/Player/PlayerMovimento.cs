@@ -21,19 +21,8 @@ public class PlayerMovimento : NetworkBehaviour
         networkHealth = GetComponent<NetworkHealth>();
     }
 
-    public override void OnNetworkSpawn()
-    {
-        base.OnNetworkSpawn();
-
-        Debug.Log($"[Player] Nasceu: {name} | Dono: {OwnerClientId} | Sou o dono: {IsOwner}");
-
-        // Posiciona cada jogador separado ao nascer usando o método seguro de teleporte
-        if (IsOwner)
-        {
-            Vector3 posicaoInicial = new Vector3(OwnerClientId * 2f, 1f, 0f);
-            Teleportar(posicaoInicial);
-        }
-    }
+    // A posição inicial agora é decidida só pelo GerenciadorSpawn.
+    // (Antes, este script teleportava todo mundo para (clientId * 2, 1, 0) e ignorava o ponto de spawn.)
 
     private void Update()
     {

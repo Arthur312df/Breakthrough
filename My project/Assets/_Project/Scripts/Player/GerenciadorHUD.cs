@@ -24,6 +24,14 @@ public class GerenciadorHUD : MonoBehaviour
     private PlayerInventory inventarioLocal;
     private bool inventarioAberto = true;
 
+    // Só reescreve um texto quando o valor mudou (evita criar lixo de memória todo frame)
+    private bool forcarAtualizacao = true;
+    private bool itensSujos = true;
+    private readonly StringBuilder sb = new StringBuilder(128);
+
+    private int ultVida, ultVidaMax, ultMana, ultManaMax, ultNivel, ultXp, ultXpProx;
+    private int ultFor, ultAgi, ultInt, ultVit, ultOuro;
+
     private void Update()
     {
         if (ApertouTeclaInventario())
@@ -40,29 +48,38 @@ public class GerenciadorHUD : MonoBehaviour
         AtualizarUI();
     }
 
+    private void OnDestroy()
+    {
+        Desvincular();
+    }
+
     private bool ApertouTeclaInventario()
     {
-        bool apertou = false;
-
 #if ENABLE_INPUT_SYSTEM
-        if (Keyboard.current != null)
+        Keyboard teclado = Keyboard.current;
+        if (teclado != null && (teclado.iKey.wasPressedThisFrame || teclado.tabKey.wasPressedThisFrame))
         {
-            apertou = Keyboard.current.iKey.wasPressedThisFrame || Keyboard.current.tabKey.wasPressedThisFrame;
+            return true;
         }
 #endif
 
-        // Fallback caso o Input Manager antigo também esteja ativo
-        if (!apertou)
+        // Só usa o sistema antigo se ele estiver ativo no projeto.
+        // (Sem este #if, projetos só com o Input System novo dão erro a cada frame.)
+#if ENABLE_LEGACY_INPUT_MANAGER
+        if (Input.GetKeyDown(KeyCode.I) || Input.GetKeyDown(KeyCode.Tab))
         {
-            apertou = Input.GetKeyDown(KeyCode.I) || Input.GetKeyDown(KeyCode.Tab);
+            return true;
         }
+#endif
 
-        return apertou;
+        return false;
     }
 
     private void AlternarVisibilidadeInventario()
     {
         inventarioAberto = !inventarioAberto;
+
+        if (inventarioAberto) forcarAtualizacao = true; // redesenha tudo ao reabrir
 
         // Se você arrastou um painel pai (e ele não é o próprio objeto deste script), liga/desliga o painel
         if (painelInventario != null && painelInventario != this.gameObject)
@@ -81,44 +98,100 @@ public class GerenciadorHUD : MonoBehaviour
         if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsConnectedClient) return;
 
         var localPlayer = NetworkManager.Singleton.SpawnManager.GetLocalPlayerObject();
-        if (localPlayer != null)
+        if (localPlayer == null) return;
+
+        // Só vincula quando o player tem os três componentes
+        if (!localPlayer.TryGetComponent(out NetworkHealth saude)) return;
+        if (!localPlayer.TryGetComponent(out PlayerStats stats)) return;
+        if (!localPlayer.TryGetComponent(out PlayerInventory inventario)) return;
+
+        Desvincular();
+
+        saudeLocal = saude;
+        statsLocal = stats;
+        inventarioLocal = inventario;
+        inventarioLocal.OnInventarioAtualizado += MarcarItensSujos;
+
+        ResetarCache();
+    }
+
+    private void Desvincular()
+    {
+        if (inventarioLocal != null)
         {
-            localPlayer.TryGetComponent(out saudeLocal);
-            localPlayer.TryGetComponent(out statsLocal);
-            localPlayer.TryGetComponent(out inventarioLocal);
+            inventarioLocal.OnInventarioAtualizado -= MarcarItensSujos;
         }
+    }
+
+    private void MarcarItensSujos()
+    {
+        itensSujos = true;
+    }
+
+    private void ResetarCache()
+    {
+        forcarAtualizacao = true;
+        itensSujos = true;
+        ultVida = ultVidaMax = ultMana = ultManaMax = ultNivel = ultXp = ultXpProx = -1;
+        ultFor = ultAgi = ultInt = ultVit = ultOuro = -1;
     }
 
     private void AtualizarUI()
     {
-        if (textoVida != null && saudeLocal != null)
+        // --- Sempre visíveis ---
+        int vida = saudeLocal.vidaAtual.Value;
+        int vidaMax = saudeLocal.vidaMaxima.Value;
+        if (textoVida != null && (vida != ultVida || vidaMax != ultVidaMax))
         {
-            textoVida.text = $"Vida: {saudeLocal.vidaAtual.Value} / {saudeLocal.vidaMaxima.Value}";
+            ultVida = vida;
+            ultVidaMax = vidaMax;
+            textoVida.text = $"Vida: {vida} / {vidaMax}";
         }
 
-        if (textoMana != null && statsLocal != null)
+        int mana = statsLocal.manaAtual.Value;
+        int manaMax = statsLocal.manaMaxima.Value;
+        if (textoMana != null && (mana != ultMana || manaMax != ultManaMax))
         {
-            textoMana.text = $"Mana: {statsLocal.manaAtual.Value} / {statsLocal.manaMaxima.Value}";
+            ultMana = mana;
+            ultManaMax = manaMax;
+            textoMana.text = $"Mana: {mana} / {manaMax}";
         }
 
-        if (textoXP != null && statsLocal != null)
+        int nivel = statsLocal.nivel.Value;
+        int xp = statsLocal.xpAtual.Value;
+        int xpProx = statsLocal.xpProximoNivel.Value;
+        if (textoXP != null && (nivel != ultNivel || xp != ultXp || xpProx != ultXpProx))
         {
-            textoXP.text = $"Nível: {statsLocal.nivel.Value} | XP: {statsLocal.xpAtual.Value} / {statsLocal.xpProximoNivel.Value}";
+            ultNivel = nivel;
+            ultXp = xp;
+            ultXpProx = xpProx;
+            textoXP.text = $"Nível: {nivel} | XP: {xp} / {xpProx}";
         }
 
         if (!inventarioAberto) return;
 
-        if (textoAtributos != null && statsLocal != null)
+        // --- Só quando o painel está aberto ---
+        int forca = statsLocal.forca.Value;
+        int agilidade = statsLocal.agilidade.Value;
+        int inteligencia = statsLocal.inteligencia.Value;
+        int vitalidade = statsLocal.vitalidade.Value;
+        if (textoAtributos != null && (forcarAtualizacao || forca != ultFor || agilidade != ultAgi || inteligencia != ultInt || vitalidade != ultVit))
         {
-            textoAtributos.text = $"FOR: {statsLocal.forca.Value} | AGI: {statsLocal.agilidade.Value} | INT: {statsLocal.inteligencia.Value} | VIT: {statsLocal.vitalidade.Value}";
+            ultFor = forca;
+            ultAgi = agilidade;
+            ultInt = inteligencia;
+            ultVit = vitalidade;
+            textoAtributos.text = $"FOR: {forca} | AGI: {agilidade} | INT: {inteligencia} | VIT: {vitalidade}";
         }
 
-        if (textoOuro != null && inventarioLocal != null)
+        int ouro = inventarioLocal.ObterOuro();
+        if (textoOuro != null && (forcarAtualizacao || ouro != ultOuro))
         {
-            textoOuro.text = $"Ouro: {inventarioLocal.ObterOuro()}";
+            ultOuro = ouro;
+            textoOuro.text = $"Ouro: {ouro}";
         }
 
-        if (textoItensInventario != null && inventarioLocal != null)
+        if (textoItensInventario != null && (forcarAtualizacao || itensSujos))
         {
             var itens = inventarioLocal.ObterItens();
             if (itens.Count == 0)
@@ -127,13 +200,17 @@ public class GerenciadorHUD : MonoBehaviour
             }
             else
             {
-                StringBuilder sb = new StringBuilder("Itens:\n");
-                foreach (var item in itens)
+                sb.Clear();
+                sb.Append("Itens:\n");
+                for (int i = 0; i < itens.Count; i++)
                 {
-                    sb.AppendLine($"- {item}");
+                    sb.Append("- ").Append(itens[i]).Append('\n');
                 }
                 textoItensInventario.text = sb.ToString();
             }
         }
+
+        forcarAtualizacao = false;
+        itensSujos = false;
     }
 }

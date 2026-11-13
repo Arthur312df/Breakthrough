@@ -6,35 +6,43 @@ public class CameraSegue : MonoBehaviour
     [Header("Configurações")]
     [SerializeField] private Vector3 offset = new Vector3(0f, 12f, -8f);
     [SerializeField] private float velocidadeInterpolacao = 5f;
+    [SerializeField] private float intervaloBusca = 0.25f;
 
     private Transform alvoPlayer;
+    private float proximaBusca;
 
     private void LateUpdate()
     {
-        // Se ainda não achou o player local, continua procurando
+        // Ainda não achou o player local: procura algumas vezes por segundo (não todo frame)
         if (alvoPlayer == null)
         {
-            LocalizarPlayerLocal();
+            if (Time.time >= proximaBusca)
+            {
+                proximaBusca = Time.time + intervaloBusca;
+                alvoPlayer = ProcurarPlayerLocal();
+
+                // Ao achar, já posiciona a câmera sem "voar" até lá
+                if (alvoPlayer != null)
+                {
+                    transform.position = alvoPlayer.position + offset;
+                }
+            }
             return;
         }
 
-        // Segue o player local suavemente
+        // Suavização que não muda com o FPS
         Vector3 posicaoDesejada = alvoPlayer.position + offset;
-        transform.position = Vector3.Lerp(transform.position, posicaoDesejada, velocidadeInterpolacao * Time.deltaTime);
+        float fator = 1f - Mathf.Exp(-velocidadeInterpolacao * Time.deltaTime);
+        transform.position = Vector3.Lerp(transform.position, posicaoDesejada, fator);
     }
 
-    private void LocalizarPlayerLocal()
+    private Transform ProcurarPlayerLocal()
     {
-        // Varre todos os NetworkObjects ativos na cena para achar o SEU player
-        foreach (var networkObj in NetworkManager.Singleton.SpawnManager.SpawnedObjectsList)
-        {
-            // O segredo está aqui: IsOwner garante que é o player daSTA tela específica (seja na Build ou no Editor)
-            if (networkObj.IsOwner && networkObj.CompareTag("Player"))
-            {
-                alvoPlayer = networkObj.transform;
-                Debug.Log($"[Camera] Alvo local encontrado com sucesso para o Client ID: {networkObj.OwnerClientId}");
-                break;
-            }
-        }
+        NetworkManager rede = NetworkManager.Singleton;
+        if (rede == null || !rede.IsListening || rede.SpawnManager == null) return null;
+
+        // O Netcode já sabe qual é o player deste computador
+        NetworkObject jogador = rede.SpawnManager.GetLocalPlayerObject();
+        return jogador != null ? jogador.transform : null;
     }
 }
